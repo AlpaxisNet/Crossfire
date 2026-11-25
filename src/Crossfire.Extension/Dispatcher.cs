@@ -8,36 +8,6 @@ using Crossfire.Extension.Protocol;
 
 namespace Crossfire.Extension;
 
-/// <summary>The counters that the reader thread and the worker both add to.</summary>
-internal sealed class Counters
-{
-    private long framesIn;
-    private long framesOut;
-    private long pings;
-    private long requests;
-    private long errors;
-
-    public long FramesIn => Interlocked.Read(ref framesIn);
-
-    public long FramesOut => Interlocked.Read(ref framesOut);
-
-    public long Pings => Interlocked.Read(ref pings);
-
-    public long Requests => Interlocked.Read(ref requests);
-
-    public long Errors => Interlocked.Read(ref errors);
-
-    public void CountFrameIn() => Interlocked.Increment(ref framesIn);
-
-    public void CountFrameOut() => Interlocked.Increment(ref framesOut);
-
-    public void CountPing() => Interlocked.Increment(ref pings);
-
-    public void CountRequest() => Interlocked.Increment(ref requests);
-
-    public void CountError() => Interlocked.Increment(ref errors);
-}
-
 /// <summary>The outcome of an operation: a status, and the result (a string that says what went wrong when the status is not 0).</summary>
 internal readonly record struct Outcome(int Status, Val Result)
 {
@@ -52,11 +22,35 @@ internal sealed class ExtensionOptions
     /// <summary>Called on the worker thread before it handles a request (a test makes the worker slow here).</summary>
     public Action<ulong>? BeforeOperation { get; init; }
 
+    /// <summary>Called on the worker thread right after it took a request from the queue (a test lets a request wait here).</summary>
+    public Action<ulong>? AfterDequeue { get; init; }
+
     /// <summary>The largest tag the extension gives out (a test lowers it to see the answer when the tags are used up).</summary>
     public uint TagLimit { get; init; } = uint.MaxValue;
 
     /// <summary>How long the process waits for the worker to finish when the connection ends.</summary>
-    public TimeSpan WorkerGrace { get; init; } = TimeSpan.FromSeconds(3);
+    public TimeSpan WorkerGrace { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long <c>session.init</c> waits for an older process's lock on the data folder (protocol section 1: 20 s).</summary>
+    public TimeSpan LockWait { get; init; } = TimeSpan.FromSeconds(20);
+
+    /// <summary>How long <c>session.shutdown</c> with save true waits for the files (the host waits 10 s for its REPLY).</summary>
+    public TimeSpan ShutdownSaveTimeout { get; init; } = TimeSpan.FromSeconds(8);
+
+    /// <summary>How long the exit waits for the files when the connection ends (the process must be gone within 5 s: the grace and this fit in it).</summary>
+    public TimeSpan ExitSaveTimeout { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>When the file writer writes.</summary>
+    public FileWriterOptions Writer { get; init; } = new();
+
+    /// <summary>The manifest's <c>wants_tick</c>: false in the shipped manifest, a test sets it to send ticks.</summary>
+    public bool WantsTick { get; init; }
+
+    /// <summary>How long the worker spins on its queue after a REPLY before it blocks (design section 7).</summary>
+    public TimeSpan Spin { get; init; } = TimeSpan.FromTicks(500); // 50 microseconds: a tick of TimeSpan is 100 ns
+
+    /// <summary>The source of the wall-clock times written to the state file.</summary>
+    public TimeProvider Time { get; init; } = TimeProvider.System;
 }
 
 /// <summary>The worker side: one request at a time, in the order they arrive.</summary>
@@ -67,14 +61,23 @@ internal sealed class Dispatcher
     private readonly ExtensionOptions options;
     private readonly Counters counters;
     private readonly int maxFrame;
+    private readonly CancellationToken stopping;
+    private readonly SessionState session;
+    private readonly HostClock clock = new();
+    private DataLock? dataLock;
+    private FileWriter? writer;
+    private bool saveOnExit = true;
+    private bool savedAtShutdown;
 
     private readonly Dictionary<Archetype, uint> tagOf = new();
     private readonly List<Archetype> archByTag = new();
     private CfWorld? world;
     private int archetypeCount;
 
-    public Dispatcher(HostHello host, int maxFrame, Action<int, string> log, ExtensionOptions options, Counters counters)
+    public Dispatcher(HostHello host, int maxFrame, Action<int, string> log, ExtensionOptions options, Counters counters, CancellationToken stopping = default)
     {
+        this.stopping = stopping;
+        session = new SessionState(options.Time);
         this.host = host;
         this.maxFrame = maxFrame;
         this.log = log;
@@ -130,8 +133,10 @@ internal sealed class Dispatcher
         }
         switch (req.Op)
         {
+            case 2 when options.WantsTick:
+                return Tick(req.Args);
             case 3:
-                return req.Args.Count == 0 ? Outcome.Ok(Val.Nil) : Outcome.Fail(Status.BadArgs, "session.flush takes no arguments");
+                return Flush(req.Args);
             case 4:
                 return Shutdown(req.Args);
             case 9:
@@ -151,7 +156,7 @@ internal sealed class Dispatcher
             case Manifest.OpFindArchetypeByRealName:
                 return FindArchetype(req.Args, byRealName: true);
             default:
-                // 2 (session.tick: the manifest does not ask for it), 5 to 8, 14 and 16 (players, levels, objects: later waves),
+                // 2 without wants_tick (the host must not send it), 5 to 8, 14 and 16 (players, levels, objects: later waves),
                 // 17 to 63 (reserved) and the manifest's other ids
                 return Outcome.Fail(Status.UnknownOp, "unknown operation " + req.Op);
         }
@@ -165,6 +170,23 @@ internal sealed class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "session.init takes no arguments and comes once");
         }
+        // the lock comes before the world is loaded: an older process may still be saving into this folder (protocol section 1)
+        try
+        {
+            Directory.CreateDirectory(host.DataDir);
+            // a session.init that failed after the lock was taken keeps it: a second try must not wait for itself
+            dataLock ??= DataLock.Acquire(Path.Combine(host.DataDir, ".lock"), options.LockWait, stopping);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return Outcome.Fail(Status.Internal, "the data folder cannot be locked: " + e.Message);
+        }
+        if (dataLock == null)
+        {
+            log(1, "the data folder " + host.DataDir + " is locked by another process");
+            return Outcome.Fail(Status.Busy, "the data folder is locked by another process");
+        }
+        writer ??= new FileWriter(host.DataDir, options.Writer, counters, log);
         string? arch = new[] { "Arch", "arch" }.Select(n => Path.Combine(host.WorldDir, n)).FirstOrDefault(Directory.Exists);
         if (arch == null)
         {
@@ -186,30 +208,109 @@ internal sealed class Dispatcher
         }
         world = w;
         archetypeCount = count;
+        session.Archetypes = count;
+        session.MarkInitialized();
         Initialized = true;
+        SubmitSnapshot("init");
         log(2, "loaded " + count + " archetypes (" + parts + " of them parts) from " + collection.Files.Count + " files; "
             + w.LogCounts[(int)LogLevel.Error] + " errors in the data, " + collection.Warnings.Count + " warnings of the collector");
         return Outcome.Ok(Val.Map(("archetypes", Val.Int(count))));
     }
 
-    private static Outcome Shutdown(IReadOnlyList<Val> args)
+    private Outcome Tick(IReadOnlyList<Val> args)
     {
-        // nothing is saved yet: the one argument is `save`, a bool (nil reads as false: section 6.3)
+        if (args.Count != 1 || args[0].AsNumberToInt() is not { } nowMs)
+        {
+            return Outcome.Fail(Status.BadArgs, "session.tick takes now_ms, an int");
+        }
+        if (!clock.Tick(nowMs))
+        {
+            return Outcome.Fail(Status.BadArgs, "now_ms is negative or before the last tick's");
+        }
+        session.Ticks++;
+        return Outcome.Ok(Val.Nil);
+    }
+
+    private Outcome Flush(IReadOnlyList<Val> args)
+    {
+        if (args.Count != 0)
+        {
+            return Outcome.Fail(Status.BadArgs, "session.flush takes no arguments");
+        }
+        session.Flushes++;
+        SubmitSnapshot("flush");
+        writer!.Kick(); // the REPLY does not wait for the files
+        return Outcome.Ok(Val.Nil);
+    }
+
+    private Outcome Shutdown(IReadOnlyList<Val> args)
+    {
+        // the one argument is `save`, a bool (nil reads as false: section 6.3)
         if (args.Count != 1 || !(args[0].IsNil || args[0].IsBool))
         {
             return Outcome.Fail(Status.BadArgs, "session.shutdown takes one bool");
         }
+        if (!args[0].AsBool)
+        {
+            saveOnExit = false;
+            writer!.Discard();
+            return Outcome.Ok(Val.Nil);
+        }
+        SubmitSnapshot("shutdown");
+        if (!writer!.WaitWritten(options.ShutdownSaveTimeout))
+        {
+            return Outcome.Fail(Status.Internal, "the files could not be written");
+        }
+        savedAtShutdown = true;
         return Outcome.Ok(Val.Nil);
     }
 
-    private Val Stats() => Val.Map(
-        ("requests", Val.Int(counters.Requests)),
-        ("errors", Val.Int(counters.Errors)),
-        ("frames_in", Val.Int(counters.FramesIn)),
-        ("frames_out", Val.Int(counters.FramesOut)),
-        ("pings", Val.Int(counters.Pings)),
-        ("archetypes", Val.Int(archetypeCount)),
-        ("tags", Val.Int(archByTag.Count)));
+    /// <summary>Gives the file writer a snapshot of everything this process holds (worker only; the writer gets bytes it alone owns).</summary>
+    private void SubmitSnapshot(string reason) =>
+        writer!.Submit(SessionState.FileName, session.Snapshot(reason, host.Epoch, host.ServerName, counters, clock));
+
+    /// <summary>
+    /// The end of the connection (protocol section 1, "Stopping"): saves unless <c>session.shutdown</c> with false came before, and
+    /// stops the writer. <paramref name="workerDone"/> is false when the worker did not finish: its state is not read then, and only
+    /// what was already handed to the writer is written.
+    /// </summary>
+    public void Finish(bool workerDone)
+    {
+        if (writer == null)
+        {
+            return; // session.init never got as far as the lock: nothing is held, nothing to save
+        }
+        if (!saveOnExit)
+        {
+            writer.Discard();
+        }
+        else if (!savedAtShutdown)
+        {
+            if (workerDone && Initialized)
+            {
+                SubmitSnapshot("exit");
+            }
+            if (!writer.WaitWritten(options.ExitSaveTimeout))
+            {
+                log(0, "the files were not all written before the exit");
+            }
+        }
+        writer.Stop(TimeSpan.FromMilliseconds(500));
+    }
+
+    /// <summary>Gives up the lock on the data folder.</summary>
+    public void Release() => dataLock?.Dispose();
+
+    private Val Stats()
+    {
+        List<(string, Val)> pairs = counters.ToPairs();
+        pairs.Add(("archetypes", Val.Int(archetypeCount)));
+        pairs.Add(("tags", Val.Int(archByTag.Count)));
+        pairs.Add(("ticks", Val.Int(session.Ticks)));
+        pairs.Add(("last_tick_ms", Val.Int(clock.LastTickMs)));
+        pairs.Add(("flushes", Val.Int(session.Flushes)));
+        return Val.Map(pairs.ToArray());
+    }
 
     // ------------------------------------------------------------------ handles
 
