@@ -232,6 +232,23 @@ public class LifecycleTests
     }
 
     [Fact]
+    public void Shutdown_Given_save_false_and_a_short_quiet_time_When_the_quiet_time_passes_with_the_connection_still_open_Then_nothing_is_written()
+    {
+        // Arrange
+        using var world = TestWorld.Make();
+        var options = new ExtensionOptions { Writer = new FileWriterOptions { Quiet = TimeSpan.FromMilliseconds(400), MaxDelay = TimeSpan.FromMilliseconds(400) } };
+        using ScriptedHost host = ScriptedHost.Handshake(world.Path, out _, options);
+        host.Init();
+
+        // Act
+        host.Call(4, new[] { Val.False });
+        Thread.Sleep(1200);
+
+        // Assert
+        Assert.False(File.Exists(StateFile(world)));
+    }
+
+    [Fact]
     public void Exit_Given_the_host_closing_without_shutdown_When_the_connection_ends_Then_the_state_is_saved_and_the_process_exits_within_5_s()
     {
         // Arrange

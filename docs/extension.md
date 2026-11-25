@@ -9,22 +9,105 @@ The output folder of the build is an extension folder (protocol section 1): the 
 
 - **Link.** The thread that runs `Main` (X) only reads: it answers `PING` at once (also while the worker is busy), refuses
   frames the host may not send (protocol section 9) and hands each `REQ` to one worker thread (W). Only W touches the `CfWorld`,
-  which has no locks. Every frame is written whole under one lock. When the connection ends (EOF or a protocol error) the process
-  gives W 3 s to finish and exits: status 0 on EOF, 3 on a protocol error, 2 when the host's `proto_major` is not 1 (no HELLO is
-  sent then), 64 and 69 for wrong arguments and a socket that cannot be reached (a path too long for a socket address included). Nothing goes to standard output; the extension's
-  own lines are `LOG` frames (a line on standard error only before the HELLO is sent, or after the connection is gone).
-- **Operations.** `session.init` (loads `<world_dir>/Arch`, else `<world_dir>/arch`, through `ArchCollector` and
-  `CfWorld.InitArchetypes`, replies `{archetypes: <count>}`, logs a summary), `session.flush` and `session.shutdown` (nothing is
-  saved yet: nil), `get`, `get_many`, `stats` and the manifest functions below. `set`, `get_list` and `invoke` check their
-  arguments and handle and then fail with `bad_args`, as the text says for a read-only member, a member that is no list of
-  handles and a method that does not exist. Every other op (`session.tick`, `player.*`, `level.*`, `object.destroyed`,
-  `objects.blobs`, the reserved 17 to 63 and unknown manifest ids) is `unknown_op`; a request before the REPLY to `session.init` is
-  `unavailable`.
+  which has no locks. Every frame is written whole under one lock. Exit statuses: 0 on EOF or after a `session.shutdown`, 3 on a
+  protocol error, 2 when the host's `proto_major` is not 1 (no HELLO is sent then), 64 and 69 for wrong arguments and a socket that
+  cannot be reached (a path too long for a socket address included). Nothing goes to standard output; the extension's own lines
+  are `LOG` frames (a line on standard error only before the HELLO is sent, or after the connection is gone).
+- **Operations.** `session.init` (takes the lock, loads `<world_dir>/Arch`, else `<world_dir>/arch`, through `ArchCollector` and
+  `CfWorld.InitArchetypes`, replies `{archetypes: <count>}`, logs a summary), `session.tick` (only with `wants_tick`),
+  `session.flush`, `session.shutdown`, `get`, `get_many`, `stats` and the manifest functions below. `set`, `get_list` and
+  `invoke` check their arguments and handle and then fail with `bad_args`, as the text says for a read-only member, a member that
+  is no list of handles and a method that does not exist. Every other op (`session.tick` when the manifest has `wants_tick` false,
+  `player.*`, `level.*`, `object.destroyed`, `objects.blobs`, the reserved 17 to 63 and unknown manifest ids) is `unknown_op`; a
+  request before the REPLY to `session.init` is `unavailable`.
 - **Handles.** The epoch of the host's HELLO in the high 32 bits and one tag per archetype in the low 32 bits, given out at the
   first `findarchetype` that finds it and kept for the life of the process. A nil, other-epoch, tag-0 or never-issued handle is
   `bad_handle`. Releases are ignored: archetypes are permanent.
-- **Not here yet** (later waves): objects, players, levels, effects, events, queries, the file lock on `<data_dir>/.lock`,
-  `session.tick`, saving.
+- **Not here yet** (later waves): objects, players, levels, effects, events, queries, the account and level files. The paging
+  helpers for `level.load` are here and tested with synthetic items (below).
+
+## Lifecycle
+
+**The lock.** `session.init` first creates `<data_dir>` (from the host's HELLO) when it is missing and takes an exclusive
+`flock(2)` on `<data_dir>/.lock` (the file is created when missing), before it reads a single archetype: the host's HELLO deadline
+is 15 s, shorter than the wait. A lock held by an older process is waited for up to 20 s (the file is tried every 25 ms: `flock`
+has no wait with a time limit); if it is still held, `session.init` answers `busy` (status 7), no world is loaded, and the
+process exits when the host closes the connection. If the connection ends during the wait, the wait stops at once. The lock belongs
+to the open file and is held until the process ends (the kernel drops it on a crash too), so another process sees it held: the
+tests show that with `flock(1)` as the second process, in both directions. The file is opened with `open(2)` directly, because
+`File.OpenHandle` makes the .NET runtime take advisory locks of its own, which would make a plain open fail while an older process
+holds the flock. The lock is Linux's `flock`; other systems are not supported. A `session.init` that failed after the lock was
+taken (no `Arch` folder) keeps it, and a second `session.init` does not wait for it.
+
+**Flush.** `session.flush` hands the file writer a snapshot and kicks it (a write at once instead of after the quiet time), then
+replies nil without waiting for the files.
+
+**Shutdown.** `session.shutdown` with `save` true hands a snapshot to the writer and replies after the files are on disk
+(`internal` when they cannot be written; the wait is 8 s at most, the host waits 10 s). With `save` false or nil it writes nothing
+and drops what the writer was still holding (including the snapshot of an earlier flush that was not written yet): the process then
+writes nothing at the exit either. After the REPLY, a further `REQ` is a protocol error (as before).
+
+**The end of the connection** (EOF, an error, a protocol error): the reader stops, a waiting lock stops waiting, the worker is given
+2 s to finish, then the state is saved (unless `session.shutdown` with `save` false came before, or the shutdown with `save` true
+already wrote it, or `session.init` never took the lock) and the writer is given 2 s to write: the process is gone well within the 5 s
+of protocol section 1. A file that cannot be written in time is logged and left.
+
+**Ticks.** The shipped manifest has `wants_tick` false (Graal Kingdoms' monsters come in wave 3); a test option sets it true. With
+it, `session.tick [now_ms]` answers nil and keeps `now_ms` in `HostClock`: the host's monotonic time in milliseconds, which later
+waves read as `NowMs` (the last tick's value plus the extension's own stopwatch since it arrived), never as a count of ticks. A
+`now_ms` that is not an int, is negative or is before the last tick's is `bad_args` and changes nothing. Without `wants_tick` the
+host must not send the op (protocol op 2: "Only with `wants_tick`"), and the extension answers `unknown_op`, as for any op the
+manifest did not ask for.
+
+**The spin.** After writing a REPLY the worker looks at its queue for 50 microseconds before it blocks (design section 7: a chain of
+requests stays hot). It spins only after a REPLY, so an idle extension uses no CPU. `spin_hits` counts the requests that arrived
+inside the spin and `spin_misses` the spins that ended empty.
+
+## The files
+
+All files are under `<data_dir>`, written by the writer thread Wr, never by the worker: W makes an immutable snapshot (the whole
+content of a file as bytes) and hands it over, and does not wait for Wr except in `session.shutdown` with `save` true and at the exit.
+
+- **Writing.** A file is written to `<name>.<pid>.tmp` in its own folder (folders are created), flushed to disk and renamed over
+  the file (an atomic replace on one file system): a reader sees the old or the new content, never a part. A snapshot is written
+  1 s after the last change that followed it, and no change waits more than 5 s however many follow it (protocol section 1: "within
+  5 s"); a flush, a shutdown and the exit write at once. The newest snapshot of a name wins. The writer holds one lock, for its own
+  table, never while it writes; a write that fails (disk full, folder missing) is logged, counted (`writer_failures`) and tried
+  again after the quiet time. A name must be a relative path of the data folder (no `..`, no empty part).
+- **`.lock`**: the lock file (empty).
+- **`session.json`**: what the process knows of itself, written when the world is loaded and at every flush, shutdown (save) and
+  exit (the later snapshots replace it). JSON, one object: `format` (1), `reason` (`init`, `flush`, `shutdown` or `exit`), `epoch`
+  and `server_name` of the host's HELLO, `started_utc`, `initialized_utc` (after `session.init`), `saved_utc`, `last_tick_ms` (-1
+  before the first tick), `ticks`, `flushes`, `archetypes`, `requests`, `errors`, `frames_in`, `frames_out` (the counters at the
+  time). The extension does not read it back; wave 3's `accounts/` and `levels/` go through the same writer.
+
+## Counters (`stats`, op 15)
+
+`stats` returns a flat map of ints. The totals: `requests`, `errors`, `frames_in`, `frames_out`, `bytes_in`, `bytes_out` (frames
+including their 4-byte length; the HELLOs are not counted in `frames_in`), `pings`, `spin_hits`, `spin_misses`, `archetypes`, `tags`,
+`ticks`, `last_tick_ms`, `flushes`. The GC: `gc_gen0`, `gc_gen1`, `gc_gen2` (collection counts of the process),
+`gc_pause_ns` (`GC.GetTotalPauseDuration`), `gc_allocated_bytes`. The writer: `writer_writes` (passes), `writer_files`,
+`writer_failures`, `writer_ns_total`, `writer_ns_max` (time of a pass). For each op that was called, with `<op>` one of
+`session_init`, `session_tick`, `session_flush`, `session_shutdown`, `get`, `set`, `get_many`, `get_list`, `invoke`, `stats`,
+`findarchetype`, `findarchetypebyrealname` (and the names of the later ops), or `unknown_<number>`: `op_<op>_calls`,
+`op_<op>_errors` (status not 0), `op_<op>_handle_ns_total` and `_max` (the time in the dispatcher), `op_<op>_wait_ns_total` and
+`_max` (from the reader queueing the request to the worker starting it), `op_<op>_bytes_in` (the REQ frames) and
+`op_<op>_bytes_out` (the REPLY frames). An op's own counters are recorded after its REPLY is written, so `stats` does not show itself.
+
+## Paging helpers (`Paging.cs`)
+
+- `Paging.LevelPage(items, cursor, perPage, sizeOf, budget)` makes the page of a `level.load` call: at most 64 items (`perPage`
+  1 to 64) and, with `sizeOf` and `budget`, as many as fit in the budget; the result is `{more, cursor}` (`Page.Result()`). The
+  cursor is nil for the first call, then the index of the next item as an int (a few bytes; `Paging.CursorFits` checks any cursor
+  against the 1,024 bytes of the protocol). The list must keep its order and items between the calls of one load. A cursor that is
+  not nil or an int in `0..count` is a `BadCursorException` (the `level.load` handler of wave 3 answers `bad_args`); an item that alone is over the
+  budget is an `ItemTooLargeException`.
+- `Paging.ReplyBudget(maxFrame, result, reserve)` is the number of bytes the lists of a REPLY may hold together so that the frame
+  stays within the link's maximum (the frame with empty lists and the largest request id and status, the growth of the two counts,
+  and `reserve`, for example `Paging.MaxCursorBytes` for a cursor not yet known).
+- `Paging.Split(items, sizeOf, budget)` splits a list into consecutive parts that each fit in the budget (a part is never empty);
+  `Paging.Split(values, budget)` does so by the encoded size of values. Wave 3 uses them for the effects of `level.load` and the
+  rows of `get_list` and `objects.blobs`.
 
 ## The GK adaptation
 

@@ -267,11 +267,13 @@ public class LockTests
             Thread.Sleep(200);
 
             // Act
+            var watch = Stopwatch.StartNew();
             host.CloseHostSide();
             int exit = host.WaitExit();
 
             // Assert
             Assert.Equal(ExtensionRunner.ExitOk, exit);
+            Assert.True(watch.ElapsedMilliseconds < 1500, "the wait for the lock was not cut short: " + watch.ElapsedMilliseconds + " ms");
         }
     }
 

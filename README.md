@@ -34,7 +34,9 @@ The design, the decisions behind it and the phases are in the Alpaxis Suite's `s
 - `src/Crossfire.Extension`: the extension itself (the executable `Crossfire.Extension --connect <socket>`): its own codec and link
   for [docs/protocol.md](docs/protocol.md), the loading of the archetypes and the manifest functions `findarchetype` and
   `findarchetypebyrealname` with the type `TMudArch`; the Graal Kingdoms adaptation is in its `Gk` folder. What it does and the
-  table of its members: [docs/extension.md](docs/extension.md). Tests: `tests/Crossfire.Extension.Tests`.
+  table of its members: [docs/extension.md](docs/extension.md). Its lifecycle (the flock on `<data_dir>/.lock`, the file writer
+  and the state file, flush, shutdown and the save at the exit, ticks, the counters of `stats`, the paging helpers) is described there too.
+  Tests: `tests/Crossfire.Extension.Tests`.
 - `tests/Crossfire.Tests`: xunit tests; two of them read Graal Kingdoms' own archetypes when the environment variable
   `CROSSFIRE_GK_ARCH` names their folder (the `Arch` folder of its world, not part of this repository) and report how many
   `Object` blocks, unknown keys and errors they find.
@@ -45,4 +47,7 @@ The design, the decisions behind it and the phases are in the Alpaxis Suite's `s
 # on the Alpaxis development machine: inside the suite's client/scripts/capped.sh (AGENTS.md)
 capped.sh -l -m 6G -t 25m dotnet build Crossfire.sln -c Release
 capped.sh -l -m 6G -t 25m dotnet test Crossfire.sln -c Release --no-build
+
+# the suite's end-to-end test of the extension with the game server (SUITE: a checkout of the Alpaxis Suite; skipped without it)
+SUITE=/path/to/Alpaxis.Suite scripts/e2e-with-suite.sh
 ```
