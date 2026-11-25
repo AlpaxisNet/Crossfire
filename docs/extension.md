@@ -44,13 +44,15 @@ replies nil without waiting for the files.
 
 **Shutdown.** `session.shutdown` with `save` true hands a snapshot to the writer and replies after the files are on disk
 (`internal` when they cannot be written; the wait is 8 s at most, the host waits 10 s). With `save` false or nil it writes nothing
-and drops what the writer was still holding (including the snapshot of an earlier flush that was not written yet): the process then
-writes nothing at the exit either. After the REPLY, a further `REQ` is a protocol error (as before).
+and drops what the writer was still holding, including the snapshot of an earlier flush that was not written yet and a batch that
+the writer had already taken (no file of it is renamed into place after the REPLY; only a rename that is already under way is
+waited for): the process then writes nothing at the exit either. After the REPLY, a further `REQ` is a protocol error (as before).
 
 **The end of the connection** (EOF, an error, a protocol error): the reader stops, a waiting lock stops waiting, the worker is given
 2 s to finish, then the state is saved (unless `session.shutdown` with `save` false came before, or the shutdown with `save` true
-already wrote it, or `session.init` never took the lock) and the writer is given 2 s to write: the process is gone well within the 5 s
-of protocol section 1. A file that cannot be written in time is logged and left.
+already wrote it, or `session.init` never took the lock) and the writer is given 2 s to write: the process is gone within the 5 s
+of protocol section 1: at most 2 s (worker) + 2 s (save) + 0.5 s (the writer's thread stops) = 4.5 s, so the margin is 0.5 s and the
+three waits must not be lengthened without the others being shortened. A file that cannot be written in time is logged and left.
 
 **Ticks.** The shipped manifest has `wants_tick` false (Graal Kingdoms' monsters come in wave 3); a test option sets it true. With
 it, `session.tick [now_ms]` answers nil and keeps `now_ms` in `HostClock`: the host's monotonic time in milliseconds, which later
@@ -72,8 +74,19 @@ content of a file as bytes) and hands it over, and does not wait for Wr except i
   the file (an atomic replace on one file system): a reader sees the old or the new content, never a part. A snapshot is written
   1 s after the last change that followed it, and no change waits more than 5 s however many follow it (protocol section 1: "within
   5 s"); a flush, a shutdown and the exit write at once. The newest snapshot of a name wins. The writer holds one lock, for its own
-  table, never while it writes; a write that fails (disk full, folder missing) is logged, counted (`writer_failures`) and tried
-  again after the quiet time. A name must be a relative path of the data folder (no `..`, no empty part).
+  table, never while it writes. After the rename the folder is fsynced too, so that the rename itself survives a power loss (what
+  the tests cannot observe: neither the fsync of the file nor that of the folder). A name must be a relative path of the data
+  folder: no `..`, no empty part, no control character (including NUL), and it does not end in `.tmp` (those are the temporary
+  files); `Submit` throws `ArgumentException` otherwise.
+- **Failures.** Any exception of a write is a failed write; it never ends the thread. A name the system refuses
+  (`ArgumentException`, `NotSupportedException`, `PathTooLongException`) is given up at once. Any other failure (disk full, a folder
+  in the way, no permission) is counted (`writer_failures`, once per file and pass) and tried again after the quiet time, then
+  after twice that and so on up to 30 s (`MaxRetryDelay`); only the first failure of a series is logged, and after 8 failed passes
+  in a row (`MaxFailedPasses`) the files are given up and logged once. A newer submission of the same name replaces the old content
+  that is waiting to be tried again. A flush or shutdown forces a try regardless of the back-off; `session.shutdown` with
+  `save` true answers `internal` when a file was given up or not written in time.
+- **Start.** When the writer starts (the process holds the lock then) it removes `<name>.<pid>.tmp` files that a crashed process
+  left in the data folder.
 - **`.lock`**: the lock file (empty).
 - **`session.json`**: what the process knows of itself, written when the world is loaded and at every flush, shutdown (save) and
   exit (the later snapshots replace it). JSON, one object: `format` (1), `reason` (`init`, `flush`, `shutdown` or `exit`), `epoch`
