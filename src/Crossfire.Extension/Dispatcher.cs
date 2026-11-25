@@ -252,6 +252,9 @@ internal sealed class Dispatcher
 
     // ------------------------------------------------------------------ members
 
+    /// <summary>A list argument: nil reads as the empty list (section 6.3), any other kind but a list is not one.</summary>
+    private static bool IsListOrNil(Val v) => v.Kind is ValKind.List or ValKind.Nil;
+
     private static bool ArgsShapeOk(IReadOnlyList<Val> args, int count, bool handleFirst = true) =>
         args.Count == count && (!handleFirst || args[0].Kind is ValKind.Handle or ValKind.Nil);
 
@@ -267,7 +270,7 @@ internal sealed class Dispatcher
 
     private Outcome GetMany(IReadOnlyList<Val> args)
     {
-        if (!ArgsShapeOk(args, 2) || args[1].Kind != ValKind.List)
+        if (!ArgsShapeOk(args, 2) || !IsListOrNil(args[1]))
         {
             return Outcome.Fail(Status.BadArgs, "get_many takes a handle and a list of member ids");
         }
@@ -308,7 +311,7 @@ internal sealed class Dispatcher
 
     private Outcome GetList(IReadOnlyList<Val> args)
     {
-        if (!ArgsShapeOk(args, 3) || args[1].AsNumberToInt() is not { } id || args[2].Kind != ValKind.List)
+        if (!ArgsShapeOk(args, 3) || args[1].AsNumberToInt() is not { } id || !IsListOrNil(args[2]))
         {
             return Outcome.Fail(Status.BadArgs, "get_list takes a handle, a member id and a list of field ids");
         }
@@ -319,7 +322,7 @@ internal sealed class Dispatcher
 
     private Outcome Invoke(IReadOnlyList<Val> args)
     {
-        if (!ArgsShapeOk(args, 3) || args[1].AsNumberToInt() == null || args[2].Kind != ValKind.List)
+        if (!ArgsShapeOk(args, 3) || args[1].AsNumberToInt() == null || !IsListOrNil(args[2]))
         {
             return Outcome.Fail(Status.BadArgs, "invoke takes a handle, a method id and a list");
         }

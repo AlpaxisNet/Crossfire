@@ -47,7 +47,7 @@ internal static class TMudArchMembers
         Str("archname", (_, a) => a.Name ?? "");
         Str("mudrealname", (_, a) => a.Clone.Name ?? "");
         Str("fullname", (w, a) => w.QueryName(a.Clone));
-        Str("mudfullname", (w, a) => w.QueryName(a.Clone));
+        Str("mudfullname", (w, a) => w.QueryShortName(a.Clone));
         Str("icon", (_, a) => Icon(a.Clone.Face?.Name));
 
         // plain fields: mud + the Crossfire field

@@ -11,7 +11,7 @@ The output folder of the build is an extension folder (protocol section 1): the 
   frames the host may not send (protocol section 9) and hands each `REQ` to one worker thread (W). Only W touches the `CfWorld`,
   which has no locks. Every frame is written whole under one lock. When the connection ends (EOF or a protocol error) the process
   gives W 3 s to finish and exits: status 0 on EOF, 3 on a protocol error, 2 when the host's `proto_major` is not 1 (no HELLO is
-  sent then), 64 and 69 for wrong arguments and a socket that cannot be reached. Nothing goes to standard output; the extension's
+  sent then), 64 and 69 for wrong arguments and a socket that cannot be reached (a path too long for a socket address included). Nothing goes to standard output; the extension's
   own lines are `LOG` frames (a line on standard error only before the HELLO is sent, or after the connection is gone).
 - **Operations.** `session.init` (loads `<world_dir>/Arch`, else `<world_dir>/arch`, through `ArchCollector` and
   `CfWorld.InitArchetypes`, replies `{archetypes: <count>}`, logs a summary), `session.flush` and `session.shutdown` (nothing is
@@ -58,7 +58,7 @@ is a line with one of Graal Kingdoms' own keys, which the loader keeps in the cl
 | 101 | `archname` | string | archetype `name` | 5.5: "same as mudname"; 405 reads |
 | 102 | `mudrealname` | string | `clone->name` | 4.7 table (name -> mudrealname); 5.5 |
 | 103 | `fullname` | string | `query_name(clone)` | 4.8: help member `fullname` (string, read only); the rule given for this work: Crossfire's `query_name` of the clone |
-| 104 | `mudfullname` | string | `query_name(clone)` | 5.5: composed full name; 5.5 infers `query_short_name`, the rule given for this work is `query_name`; for an archetype's clone the two differ only by the state words |
+| 104 | `mudfullname` | string | `query_short_name(clone)` | 5.5: composed full name "without state words and quantity" (a grouping key), inferred as `query_short_name`; `fullname` (103) keeps `query_name`, so the two differ by the state words, for example "(applied)" on an applied archetype |
 | 105 | `icon` | string | `clone->face->name`, derived | 4.5: `"mud_" + face without ".<digits>" + ".png"`, a face ending `.png` as it is; "" without a face (or with `blank.111` or `empty.111`) |
 | 106 | `mudtype` | int | `clone->type` | 4.4, 5.5 |
 | 107 | `mudlevel` | int | `clone->level` | 5.5, 4.8 (`findArchetype(x).mudlevel`) |
@@ -138,8 +138,10 @@ is a line with one of Graal Kingdoms' own keys, which the loader keeps in the cl
 
 - `findarchetype` matches exactly. `objects.md` 4.8 guesses "exact first, then case-insensitive"; the protocol text and the
   task say neither, so the literal reading is the exact one.
-- `fullname` and `mudfullname` are `query_name` of the clone (the state words of an archetype's clone are mostly absent, so
-  `query_name` and `query_short_name` agree for them); `objects.md` 5.5 infers `query_short_name` for `mudfullname`.
+- `fullname` is `query_name` of the clone (the rule given for this work), `mudfullname` is `query_short_name` as `objects.md` 5.5
+  infers ("without state words"). They agree except for a clone with state words: 11 of Graal Kingdoms' findable archetypes (the
+  `*_force` ones with the `applied` flag) read "NAME (applied)" in `fullname` and "NAME" in `mudfullname`.
+- A nil list argument of `get_many`, `get_list` and `invoke` reads as the empty list (protocol 6.3), like a nil string.
 - `fullname` and `mudfullname` are what Crossfire's `query_short_name` makes of an object whose `nrof` is 0: the plural
   (`name_pl`) when the object has a weight, a title or a magic bonus, else `name` ("sword" with `weight 3000` and no `nrof 1` line
   reads "swords"). That is the C rule for such an object; whether Graal Kingdoms' scripts expect the singular is not known.

@@ -24,7 +24,7 @@ internal static class Program
         {
             socket.Connect(new UnixDomainSocketEndPoint(args[1]));
         }
-        catch (SocketException e)
+        catch (Exception e) when (e is SocketException or ArgumentException)
         {
             Console.Error.WriteLine("cannot connect to " + args[1] + ": " + e.Message);
             socket.Dispose();

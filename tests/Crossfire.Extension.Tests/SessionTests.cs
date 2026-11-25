@@ -706,8 +706,8 @@ public class SessionTests
             ReplyFrame notList = host.Call(12, new[] { Val.Handle(sword), Val.Int(Id("mudmessage")), Val.List() });
             ReplyFrame unknown = host.Call(12, new[] { Val.Handle(sword), Val.Int(3), Val.List() });
             ReplyFrame dead = host.Call(12, new[] { Val.Handle(Handle(1, 99)), Val.Int(Id("mudmessage")), Val.List() });
-            ReplyFrame shape = host.Call(12, new[] { Val.Handle(sword), Val.Int(Id("mudmessage")), Val.Nil });
-            ReplyFrame shapeBeforeHandle = host.Call(12, new[] { Val.Handle(Handle(1, 99)), Val.Int(Id("mudmessage")), Val.Nil });
+            ReplyFrame shape = host.Call(12, new[] { Val.Handle(sword), Val.Int(Id("mudmessage")), Val.Int(5) });
+            ReplyFrame shapeBeforeHandle = host.Call(12, new[] { Val.Handle(Handle(1, 99)), Val.Int(Id("mudmessage")), Val.Int(5) });
 
             // Assert
             AssertStatus(Status.BadArgs, notList);
@@ -734,7 +734,7 @@ public class SessionTests
             ReplyFrame method = host.Call(13, new[] { Val.Handle(sword), Val.Int(5), Val.List() });
             ReplyFrame dead = host.Call(13, new[] { Val.Handle(Handle(1, 99)), Val.Int(5), Val.List() });
             ReplyFrame shape = host.Call(13, new[] { Val.Handle(sword), S("m"), Val.List() });
-            ReplyFrame shape2 = host.Call(13, new[] { Val.Handle(sword), Val.Int(5), Val.Nil });
+            ReplyFrame shape2 = host.Call(13, new[] { Val.Handle(sword), Val.Int(5), S("not a list") });
             ReplyFrame shapeBeforeHandle = host.Call(13, new[] { Val.Handle(Handle(1, 99)), S("m"), Val.List() });
 
             // Assert
@@ -951,6 +951,164 @@ public class SessionTests
             AssertStatus(Status.TooLarge, big);
             AssertStatus(0, small);
             Assert.Equal(100, small.Result.Items.Count);
+        }
+    }
+
+    [Fact]
+    public void Reply_Given_a_body_of_exactly_the_links_maximum_When_made_Then_it_is_sent_and_one_byte_more_is_too_large()
+    {
+        // Arrange
+        const int max = 65_536;
+        (ScriptedHost host, TempFolder world) = Started(maxFrame: max);
+        using (host)
+        using (world)
+        {
+            ulong sword = Find(host, "sword");
+            const ulong reqid = 3; // session.init was 1, findarchetype 2
+            (int exact, int exactInts) = SizeFor(reqid, max);
+            (int over, int overInts) = SizeFor(reqid + 1, max + 1);
+            Val Ids(int strings, int ints) => Val.List(Enumerable.Repeat(Val.Int(Id("mudname")), strings).Concat(Enumerable.Repeat(Val.Int(Id("mudtype")), ints)));
+
+            // Act
+            ReplyFrame atLimit = host.Call(11, new[] { Val.Handle(sword), Ids(exact, exactInts) });
+            ReplyFrame beyond = host.Call(11, new[] { Val.Handle(sword), Ids(over, overInts) });
+
+            // Assert
+            AssertStatus(0, atLimit);
+            AssertStatus(Status.TooLarge, beyond);
+        }
+    }
+
+    /// <summary>A number of "sword" strings and of small ints whose reply body (without the length prefix) is exactly <paramref name="body"/> bytes.</summary>
+    private static (int Strings, int Ints) SizeFor(ulong reqid, int body)
+    {
+        for (int ints = 0; ints < 8; ints++)
+        {
+            for (int strings = 9000; strings < 9400; strings++)
+            {
+                Val list = Val.List(Enumerable.Repeat(S("sword"), strings).Concat(Enumerable.Repeat(Val.Int(15), ints)));
+                if (FrameCodec.Encode(new ReplyFrame(reqid, 0, list, Array.Empty<Val>(), Array.Empty<Val>())).Length - 4 == body)
+                {
+                    return (strings, ints);
+                }
+            }
+        }
+        throw new InvalidOperationException("no list of that size");
+    }
+
+    [Fact]
+    public void GetMany_Given_a_nil_list_When_asked_Then_nil_reads_as_the_empty_list()
+    {
+        // Arrange
+        (ScriptedHost host, TempFolder world) = Started();
+        using (host)
+        using (world)
+        {
+            ulong sword = Find(host, "sword");
+
+            // Act
+            ReplyFrame reply = host.Call(11, new[] { Val.Handle(sword), Val.Nil });
+
+            // Assert
+            AssertStatus(0, reply);
+            Assert.Equal(ValKind.List, reply.Result.Kind);
+            Assert.Empty(reply.Result.Items);
+        }
+    }
+
+    [Fact]
+    public void GetListAndInvoke_Given_a_nil_list_When_asked_Then_the_shape_is_accepted_and_the_member_or_method_is_judged()
+    {
+        // Arrange
+        (ScriptedHost host, TempFolder world) = Started();
+        using (host)
+        using (world)
+        {
+            ulong sword = Find(host, "sword");
+
+            // Act
+            ReplyFrame getList = host.Call(12, new[] { Val.Handle(sword), Val.Int(Id("mudname")), Val.Nil });
+            ReplyFrame invoke = host.Call(13, new[] { Val.Handle(sword), Val.Int(1), Val.Nil });
+
+            // Assert
+            AssertStatus(Status.BadArgs, getList);
+            Assert.Contains("is not a list of handles", getList.Result.AsString);
+            AssertStatus(Status.BadArgs, invoke);
+            Assert.Equal("unknown method", invoke.Result.AsString);
+        }
+    }
+
+    [Fact]
+    public void Writes_Given_pings_while_large_replies_are_written_When_all_frames_are_read_Then_every_frame_decodes_and_every_ping_is_answered()
+    {
+        // Arrange
+        (ScriptedHost host, TempFolder world) = Started();
+        using (host)
+        using (world)
+        {
+            ulong sword = Find(host, "sword");
+            Val ids = Val.List(Enumerable.Repeat(Val.Int(Id("mudfullname")), 60_000));
+            const int calls = 25;
+            const ulong last = 1UL << 40;
+            long pongs = 0;
+            int replies = 0;
+            using var replySeen = new AutoResetEvent(false);
+            Exception? failure = null;
+            var reader = new Thread(() =>
+            {
+                try
+                {
+                    for (; ; )
+                    {
+                        Frame f = host.Read()!;
+                        if (f is ReplyFrame r)
+                        {
+                            Assert.Equal(0UL, r.Status);
+                            Assert.Equal(60_000, r.Result.Items.Count);
+                            Interlocked.Increment(ref replies);
+                            replySeen.Set();
+                        }
+                        else if (f is PongFrame p)
+                        {
+                            Interlocked.Increment(ref pongs);
+                            if (p.N == last)
+                            {
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("unexpected frame " + f);
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    failure = e;
+                    replySeen.Set();
+                }
+            });
+            reader.Start();
+
+            // Act
+            long sent = 0;
+            for (int i = 0; i < calls && failure == null; i++)
+            {
+                host.SendReq(11, new[] { Val.Handle(sword), ids });
+                while (Volatile.Read(ref replies) <= i && failure == null)
+                {
+                    host.Send(new PingFrame((ulong)++sent));
+                    replySeen.WaitOne(0);
+                }
+            }
+            host.Send(new PingFrame(last));
+            bool done = reader.Join(TimeSpan.FromSeconds(30));
+
+            // Assert
+            Assert.Null(failure);
+            Assert.True(done);
+            Assert.Equal(calls, replies);
+            Assert.Equal(sent + 1, Interlocked.Read(ref pongs));
         }
     }
 

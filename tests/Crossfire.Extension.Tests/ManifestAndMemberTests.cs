@@ -224,6 +224,62 @@ public class ManifestAndMemberTests
         Assert.Equal(count, lines.Items.Count);
     }
 
+    [Theory]
+    [InlineData("nopick", "no_pick")]
+    [InlineData("nodamage", "no_damage")]
+    [InlineData("applied", "applied")]
+    [InlineData("undead", "undead")]
+    [InlineData("scared", "scared")]
+    [InlineData("flying", "flying")]
+    [InlineData("blind", "is_blind")]
+    [InlineData("confused", "confused")]
+    [InlineData("cursed", "cursed")]
+    [InlineData("damned", "damned")]
+    [InlineData("identified", "identified")]
+    [InlineData("unpaid", "unpaid")]
+    [InlineData("startequip", "startequip")]
+    [InlineData("alive", "alive")]
+    [InlineData("ismudmonster", "monster")]
+    public void Read_Given_an_archetype_with_one_flag_When_read_Then_only_that_flag_member_is_true(string member, string key)
+    {
+        // Arrange
+        string[] flagMembers = { "nopick", "nodamage", "applied", "undead", "scared", "flying", "blind", "confused", "cursed", "damned", "identified", "unpaid", "startequip", "alive", "ismudmonster" };
+        CfWorld w = World("Object one\n" + key + " 1\nend\n");
+
+        // Act
+        string[] trueOnes = flagMembers.Where(f => Read(w, "one", f).AsBool).ToArray();
+
+        // Assert
+        Assert.Equal(new[] { member }, trueOnes);
+    }
+
+    [Fact]
+    public void Read_Given_an_archetype_whose_object_key_differs_from_its_name_When_names_read_Then_archname_and_mudname_are_the_key_and_mudrealname_the_name()
+    {
+        // Arrange
+        CfWorld w = World("Object goblin_x\nname Goblin Chief\nend\n");
+
+        // Act / Assert
+        Assert.Equal("goblin_x", Read(w, "goblin_x", "archname").AsString);
+        Assert.Equal("goblin_x", Read(w, "goblin_x", "mudname").AsString);
+        Assert.Equal("Goblin Chief", Read(w, "goblin_x", "mudrealname").AsString);
+    }
+
+    [Fact]
+    public void Read_Given_an_applied_archetype_When_the_full_names_are_read_Then_mudfullname_has_no_state_words_and_fullname_has_them()
+    {
+        // Arrange
+        CfWorld w = World("Object force\nname force\napplied 1\nend\n");
+
+        // Act
+        string mudfullname = Read(w, "force", "mudfullname").AsString;
+        string fullname = Read(w, "force", "fullname").AsString;
+
+        // Assert
+        Assert.Equal("force", mudfullname);
+        Assert.Equal("force (applied)", fullname);
+    }
+
     [Fact]
     public void Read_Given_an_archetype_with_attack_and_flag_fields_When_read_Then_the_clones_values()
     {
@@ -357,6 +413,22 @@ public class ManifestAndMemberTests
         Assert.Equal(64, exit);
         Assert.Equal("", output);
         Assert.Contains("usage", error);
+    }
+
+    [Fact]
+    public void Main_Given_a_socket_path_longer_than_the_system_allows_When_started_Then_exit_69_without_a_stack_trace()
+    {
+        // Arrange
+        string path = "/" + new string('a', 200);
+
+        // Act
+        (int exit, string output, string error) = RunExtension("--connect", path);
+
+        // Assert
+        Assert.Equal(69, exit);
+        Assert.Equal("", output);
+        Assert.Contains("cannot connect", error);
+        Assert.DoesNotContain("   at ", error);
     }
 
     [Fact]
