@@ -728,4 +728,68 @@ public class LifecycleTests
         Assert.Equal(1, counters.FramesOut);
         Assert.Equal(7, counters.BytesOut);
     }
+
+    // ------------------------------------------------------------------ review findings
+
+    [Fact]
+    public void Exit_Given_a_worker_that_does_not_finish_within_the_grace_When_the_connection_ends_Then_no_exit_snapshot_is_taken_from_its_state()
+    {
+        // Arrange
+        using var release = new ManualResetEventSlim();
+        using var inside = new ManualResetEventSlim();
+        ExtensionOptions options = new()
+        {
+            Writer = new FileWriterOptions { Quiet = Hour, MaxDelay = Hour },
+            Spin = TimeSpan.Zero,
+            AfterDequeue = id =>
+            {
+                if (id >= 2)
+                {
+                    inside.Set();
+                    release.Wait(20_000);
+                }
+            },
+            WorkerGrace = TimeSpan.FromMilliseconds(300),
+            ExitSaveTimeout = TimeSpan.FromSeconds(2),
+        };
+        (ScriptedHost host, TempFolder world) = Started(options);
+        using (host)
+        using (world)
+        {
+            host.SendReq(15);
+            Assert.True(inside.Wait(5000));
+
+            // Act
+            host.CloseHostSide();
+            int exit = host.WaitExit();
+            release.Set();
+
+            // Assert
+            Assert.Equal(ExtensionRunner.ExitOk, exit);
+            Assert.Equal("init", ReadState(world).RootElement.GetProperty("reason").GetString()); // what was already handed over, and no "exit"
+        }
+    }
+
+    [Fact]
+    public void Flush_Given_requests_and_replies_When_flushed_Then_the_state_file_holds_the_frame_counters()
+    {
+        // Arrange
+        (ScriptedHost host, TempFolder world) = Started(Lazy());
+        using (host)
+        using (world)
+        {
+            host.Call(15);
+
+            // Act
+            host.Call(3);
+
+            // Assert
+            Assert.True(WaitFor(() => File.Exists(StateFile(world)) && ReadState(world).RootElement.GetProperty("reason").GetString() == "flush"));
+            JsonElement state = ReadState(world).RootElement;
+            Assert.True(state.GetProperty("requests").GetInt64() >= 3);
+            Assert.True(state.GetProperty("frames_in").GetInt64() >= 3);
+            Assert.True(state.GetProperty("frames_out").GetInt64() >= 2);
+            Assert.True(state.GetProperty("errors").GetInt64() >= 0);
+        }
+    }
 }

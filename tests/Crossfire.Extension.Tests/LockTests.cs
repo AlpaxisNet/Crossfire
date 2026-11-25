@@ -294,4 +294,31 @@ public class LockTests
         Assert.Equal((ulong)Status.Internal, failed.Status);
         Assert.Equal(0UL, again.Status);
     }
+
+    [Fact]
+    public void Acquire_Given_a_held_lock_When_a_child_process_is_started_Then_the_child_does_not_inherit_the_descriptor()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        using DataLock? taken = DataLock.Acquire(LockPath(folder), TimeSpan.Zero);
+        using Process child = Process.Start(new ProcessStartInfo("sleep", "30"))!;
+
+        // Act
+        string[] targets;
+        try
+        {
+            targets = Directory.GetFiles("/proc/" + child.Id + "/fd")
+                .Select(f => new FileInfo(f).LinkTarget ?? "")
+                .ToArray();
+        }
+        finally
+        {
+            child.Kill();
+            child.WaitForExit();
+        }
+
+        // Assert
+        Assert.NotNull(taken);
+        Assert.DoesNotContain(targets, t => t.EndsWith("/.lock", StringComparison.Ordinal));
+    }
 }
