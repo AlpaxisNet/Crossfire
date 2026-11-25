@@ -30,8 +30,8 @@ internal static class Manifest
         ("access", Val.Str("r")),
         ("stable", Val.True));
 
-    /// <summary>The manifest map: the two functions and the type TMudArch with its stable read-only members.</summary>
-    public static Val Build() => Val.Map(
+    /// <summary>The manifest map: the two functions and the type TMudArch with its stable read-only members; <c>wants_tick</c> is false unless asked.</summary>
+    public static Val Build(bool wantsTick = false) => Val.Map(
         ("functions", Val.List(Function(OpFindArchetype, "findarchetype"), Function(OpFindArchetypeByRealName, "findarchetypebyrealname"))),
         ("types", Val.List(Val.Map(
             ("id", Val.Int(TMudArchMembers.TypeId)),
@@ -40,7 +40,7 @@ internal static class Manifest
             ("members", Val.List(TMudArchMembers.Members.Select(Member))),
             ("methods", Val.List())))),
         ("events", Val.List()),
-        ("wants_tick", Val.False),
+        ("wants_tick", Val.Bool(wantsTick)),
         ("limits", Val.Map(("max_list", Val.Int(256)))));
 
     /// <summary>The extension's HELLO map (section 4.1), the keys in the order the text lists them; <c>max_frame</c> is left out.</summary>
