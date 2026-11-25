@@ -146,7 +146,7 @@ internal static class TMudArchMembers
     /// <summary>The lines of an archetype's message: split at newlines, the empty piece after the last newline dropped.</summary>
     public static Val Lines(string? msg)
     {
-        if (string.IsNullOrEmpty(msg))
+        if (msg == null)
         {
             return Val.List();
         }

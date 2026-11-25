@@ -481,6 +481,7 @@ public class SessionTests
             Assert.Equal("mud_gobchief.png", Get(host, goblin, "icon").Result.AsString);
             Assert.Equal("Goblin Chief", Get(host, goblin, "mudrealname").Result.AsString);
             Assert.Equal(-1L, Get(host, sword, "mudgraaltype").Result.AsInt);
+            Assert.Equal(-1L, Get(host, sword, "npctype").Result.AsInt);
             Assert.Equal("", Get(host, sword, "mudgraalparam").Result.AsString);
             Assert.False(Get(host, sword, "nopeaceful").Result.AsBool);
             Assert.False(Get(host, sword, "ismudmonster").Result.AsBool);
@@ -706,6 +707,7 @@ public class SessionTests
             ReplyFrame unknown = host.Call(12, new[] { Val.Handle(sword), Val.Int(3), Val.List() });
             ReplyFrame dead = host.Call(12, new[] { Val.Handle(Handle(1, 99)), Val.Int(Id("mudmessage")), Val.List() });
             ReplyFrame shape = host.Call(12, new[] { Val.Handle(sword), Val.Int(Id("mudmessage")), Val.Nil });
+            ReplyFrame shapeBeforeHandle = host.Call(12, new[] { Val.Handle(Handle(1, 99)), Val.Int(Id("mudmessage")), Val.Nil });
 
             // Assert
             AssertStatus(Status.BadArgs, notList);
@@ -714,6 +716,7 @@ public class SessionTests
             Assert.Contains("unknown member", unknown.Result.AsString);
             AssertStatus(Status.BadHandle, dead);
             AssertStatus(Status.BadArgs, shape);
+            AssertStatus(Status.BadArgs, shapeBeforeHandle);
         }
     }
 
@@ -732,12 +735,14 @@ public class SessionTests
             ReplyFrame dead = host.Call(13, new[] { Val.Handle(Handle(1, 99)), Val.Int(5), Val.List() });
             ReplyFrame shape = host.Call(13, new[] { Val.Handle(sword), S("m"), Val.List() });
             ReplyFrame shape2 = host.Call(13, new[] { Val.Handle(sword), Val.Int(5), Val.Nil });
+            ReplyFrame shapeBeforeHandle = host.Call(13, new[] { Val.Handle(Handle(1, 99)), S("m"), Val.List() });
 
             // Assert
             AssertStatus(Status.BadArgs, method);
             AssertStatus(Status.BadHandle, dead);
             AssertStatus(Status.BadArgs, shape);
             AssertStatus(Status.BadArgs, shape2);
+            AssertStatus(Status.BadArgs, shapeBeforeHandle);
         }
     }
 
@@ -1031,10 +1036,14 @@ public class SessionTests
         using (world)
         {
             // Act
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             host.CloseHostSide();
+            int exit = host.WaitExit();
+            clock.Stop();
 
-            // Assert
-            Assert.Equal(ExtensionRunner.ExitOk, host.WaitExit());
+            // Assert: well before the 3 s the process would wait for a worker that does not end
+            Assert.Equal(ExtensionRunner.ExitOk, exit);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1.5), clock.Elapsed.ToString());
         }
     }
 

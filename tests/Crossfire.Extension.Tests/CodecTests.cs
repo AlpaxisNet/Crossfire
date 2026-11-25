@@ -97,6 +97,7 @@ public class CodecTests
     {
         // Arrange / Act / Assert
         Assert.Throws<ProtocolException>(() => ValueCodec.Decode(B(5, 4, 0x61)));
+        Assert.Throws<ProtocolException>(() => ValueCodec.Decode(B(5, 2, 0x61)));
     }
 
     [Fact]
