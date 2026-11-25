@@ -289,6 +289,8 @@ public class ManifestAndMemberTests
         Assert.Null(TMudArchMembers.Find(100L + TMudArchMembers.Members.Count));
         Assert.Null(TMudArchMembers.Find(long.MaxValue));
         Assert.Null(TMudArchMembers.Find(long.MinValue));
+        Assert.Null(TMudArchMembers.Find(4_294_967_296L + 100));
+        Assert.Null(TMudArchMembers.Find(-4_294_967_296L + 100));
         Assert.NotNull(TMudArchMembers.Find(100));
         Assert.NotNull(TMudArchMembers.Find(99L + TMudArchMembers.Members.Count));
     }

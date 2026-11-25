@@ -213,6 +213,7 @@ public class SessionTests
 
         // Assert
         AssertStatus(Status.Internal, first);
+        Assert.Contains("no Arch folder", first.Result.AsString);
         AssertStatus(0, second);
     }
 
@@ -633,6 +634,8 @@ public class SessionTests
             AssertStatus(Status.BadArgs, host.Call(9, new[] { Val.Handle(sword), S("mudname") }));
             AssertStatus(Status.BadArgs, host.Call(9, new[] { Val.Handle(sword), Val.Int(3) }));
             AssertStatus(Status.BadArgs, host.Call(9, new[] { Val.Handle(sword), Val.Int(long.MaxValue) }));
+            AssertStatus(Status.BadArgs, host.Call(9, new[] { Val.Handle(sword), Val.Int(4_294_967_296L + Id("mudname")) }));
+            AssertStatus(Status.BadArgs, host.Call(9, new[] { Val.Handle(sword), Val.Int(-4_294_967_296L + Id("mudname")) }));
             AssertStatus(Status.BadArgs, host.Call(11, new[] { Val.Handle(sword), Val.Int(1) }));
             AssertStatus(Status.BadArgs, host.Call(11, new[] { Val.Handle(sword) }));
         }
