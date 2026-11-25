@@ -2,16 +2,18 @@
 
 This text is the contract between a game server (the **host**, the Alpaxis GameServer) and a MUD engine that runs as a separate
 program (the **extension**, such as the Crossfire extension). Each side implements it from this text alone; no code is shared. The
-host's design around it (threads, deadlines, failure handling, persistence, costs) is in the suite's `server/docs/mud-extension.md`.
+host's design around it (threads, deadlines, failure handling, persistence, costs) is in the suite's `server/docs/mud-extension.md`;
+where the two differ, this text wins.
 
 **Licence of this text:** CC0 1.0 Universal (public domain dedication). To the extent possible under law, the authors have waived
 all copyright and related rights to this text, so that any implementation, under any licence, may carry it unchanged. The suite
 keeps it as `server/docs/mud-protocol.md` and the Crossfire repository as `docs/protocol.md`; the two copies are identical.
 
-Words: **must** is a requirement whose breach is a protocol error (section 9); **should** is advice. Every number is decimal unless
-it is written as bytes (`0a`) or with `0x`.
+Words: **must** is a requirement; **should** is advice. Every number is decimal unless it is written as bytes (`0a`) or with `0x`.
+A breach of a "must" about the bytes or the order of frames is a **protocol error** (section 9); other breaches have the outcome the
+text gives at that place.
 
-## 1. Finding and starting the extension
+## 1. Finding, starting and stopping the extension
 
 An extension is a folder `<host installation>/extensions/<name>/` with a file `extension.json` and an executable:
 
@@ -27,31 +29,42 @@ An extension is a folder `<host installation>/extensions/<name>/` with a file `e
 ```
 
 - `name` matches `[a-z0-9-]{1,32}` and equals the folder's name. `protocol` is the major version the extension speaks.
-  `executable` is a file name in the same folder (no `/` or `\`). `licence` and `source` are shown to the host's operator.
+  `executable` is a file name in the same folder (no `/` or `\`). `version`, `licence` and `source` are shown to the host's operator.
 - The host chooses an extension by name from its own configuration, never from a path given by a script or a remote user.
-- The host creates a private directory (mode 0700), listens there on a Unix domain stream socket (`AF_UNIX`, `SOCK_STREAM`), and
-  starts the executable with exactly two arguments, `--connect <absolute socket path>`, with the extension's folder as the working
-  directory. The extension connects within 15 s; the host then removes the socket's path. There is one connection for the life of
-  the extension's process. When the connection ends (EOF or an error), the extension saves what it must and exits.
-- Standard input, output and error carry no protocol. The extension sends its log lines in `LOG` frames (section 4.8) and should
+- **Start.** The host creates a private directory (mode 0700) whose socket path is at most 100 bytes long, listens there on a Unix
+  domain stream socket (`AF_UNIX`, `SOCK_STREAM`), and starts the executable with exactly two arguments, `--connect <absolute socket
+  path>`, with the extension's folder as the working directory. The host accepts **one** connection and then closes the listener and
+  removes the socket's path and directory. There is one connection for the life of the extension's process.
+- **Failed start.** Any of these is a failed start, after which the host closes the connection and kills the process: no connection
+  within 15 s; the process exits before the REPLY to `session.init`; no HELLO from the extension within 15 s of the connection; a
+  HELLO that breaks section 4.1 or 6; `session.init` answered with a status other than 0 or with a result that is not a map. What
+  the host does next (retry, run without the extension) is its own design.
+- **Running.** The extension holds an exclusive lock (`flock`) on the file `<data_dir>/.lock` while it runs; a new process waits up to
+  20 s for it, and fails its start if it cannot get it. It should write a change of its state to its files within 5 s.
+- **Stopping.** After the REPLY to `session.shutdown` the host closes the connection. When the connection ends (EOF, an error, a
+  protocol error), the extension saves its state (unless `session.shutdown` with `save` false came before) and exits within 5 s;
+  the host may kill it after that.
+- Standard input, output and error carry no protocol. The extension sends its log lines in `LOG` frames (section 4.5) and should
   write nothing to standard output.
 
 ## 2. Frames
 
 A frame is a 4-byte **length** `N` (unsigned, little endian) followed by `N` bytes of **body**. `N` is at least 1 and at most the
-link's maximum (16,777,216 bytes, lowered by either HELLO's `max_frame`: the smaller wins for both directions once both HELLOs are
-read). The body is one **kind** byte and then the kind's fields, in the order section 4 gives, with no bytes after the last field.
+link's maximum: 16,777,216 bytes until both HELLOs are read, then the smallest of 16,777,216 and the `max_frame` values the two
+HELLOs give (each at least 65,536). The body is one **kind** byte and then the kind's fields, in the order section 4 gives, with no
+bytes after the last field. A sender writes every frame whole: the bytes of two frames are never interleaved, whichever threads send
+them.
 
 A field is either a **varint** (section 3.1, untagged) or a **value** (section 3.2, a tag byte and its body). Section 4 says which, and
-which types a value field may have.
+which type a value field has; a value field of another type is a protocol error.
 
 ## 3. Encoding
 
 ### 3.1 Varints
 
 An unsigned integer below 2^64 in LEB128: seven bits per byte, least significant group first, the high bit set on every byte but the
-last. Encoders write the shortest form. A decoder must reject a varint of more than 10 bytes or one whose value does not fit in 64
-bits; it may accept longer forms of a small number.
+last. Encoders write the shortest form; decoders must accept any form of at most 10 bytes whose value fits in 64 bits, and must reject
+a longer one or one that overflows.
 
 ### 3.2 Values
 
@@ -67,14 +80,24 @@ bits; it may accept longer forms of a small number.
 | 7 | list | a varint count, then that many values |
 | 8 | map | a varint count, then that many pairs: a key (a varint byte count and UTF-8, untagged) and a value |
 
-- An unknown tag is a protocol error.
-- **Maps:** keys are unique, compared as bytes (a duplicate is a protocol error). Encoders write keys in the order this text lists
-  them; decoders accept any order and ignore keys they do not know.
+- An unknown tag is a protocol error. So is a body that ends inside a varint, a string, a key or an 8-byte body.
+- **Counts:** a count of elements, or a byte count of a string or key, larger than the number of bytes left in the body is a protocol
+  error.
+- **Maps:** keys are unique, compared as their bytes before any replacement (a duplicate is a protocol error). Encoders write keys in
+  the order this text lists them, and maps whose keys this text does not list in any order; decoders accept any order and ignore keys
+  they do not know.
 - **Depth:** a value that is not a list or a map has depth 1; a list or map has depth 1 plus the largest depth of its elements (1 when
-  empty). A field's value may have depth 16 at most.
-- **Counts:** a count larger than the number of bytes left in the body is a protocol error (every element takes a byte at least).
-- **Numbers:** where this text asks for a number, a receiver must accept an int or a float and convert (a float to an int by
-  truncation toward zero, clamped to the 64-bit range; NaN gives 0).
+  empty). Each field's value, counted from the field, has depth 16 at most.
+- **Numbers:** wherever this text or a manifest asks for an int, a float or a number, a receiver accepts an int or a float and
+  converts: a float to an int by truncation toward zero, clamped to the 64-bit range, NaN giving 0. A bool, a string or a handle is
+  accepted only where its type is asked for, and nil only where the text allows it or the type is `any` (section 6). An int beyond
+  2^53 reaches scripts with less precision (scripts count in binary64).
+
+### 3.3 Map keys: required and optional
+
+A key this text lists for a map is **required** unless it is marked *optional* with its default. A HELLO or manifest that lacks a
+required key or holds one of the wrong type is invalid (a failed start for the host to read; a protocol error for the extension to
+read). An effect or event with such a fault is skipped and counted (sections 10 and 11).
 
 ## 4. Frame kinds
 
@@ -82,132 +105,184 @@ bits; it may accept longer forms of a small number.
 | --- | --- | --- | --- |
 | 1 | HELLO | both, once, first | value `hello` (map) |
 | 2 | REQ | host | varint `reqid`, varint `op`, value `releases` (list of handles), value `ctx` (map), value `args` (list) |
-| 3 | REPLY | extension | varint `reqid`, varint `status`, value `result`, value `effects` (list of maps), value `events` (list of maps), value `touched` (nil, or list of handles) |
+| 3 | REPLY | extension | varint `reqid`, varint `status`, value `result`, value `effects` (list), value `events` (list), value `touched` (nil in 1.0) |
 | 4 | QUERY | extension | varint `qid`, value `name` (string), value `args` (list) |
 | 5 | QRESULT | host | varint `qid`, varint `status`, value `result` |
 | 6 | PING | both | varint `n` |
 | 7 | PONG | both | varint `n` |
-| 8 | LOG | extension | varint `level` (0 error, 1 warning, 2 information, 3 debug), value `text` (string) |
+| 8 | LOG | extension | varint `level` (0 error, 1 warning, 2 information, 3 debug; a larger number counts as 3), value `text` (string) |
 
-An unknown kind is a protocol error. A frame sent at a time this section does not allow is a protocol error too.
+An unknown kind is a protocol error, and so is a frame sent at a time this section does not allow.
 
 ### 4.1 HELLO
 
-After the extension connects, **the host sends its HELLO first**; the extension answers with its own. Nothing else is sent before both
-are read, except that the host may close the link.
+**The host sends its HELLO first**, right after it accepts the connection, and sends nothing more until it has read the extension's.
+The extension reads the host's HELLO and answers with its own as its first frame; after that it may send LOG and PING at once. Any
+other frame read before the other side's HELLO is a protocol error. If the host's `proto_major` is not one the extension speaks, the
+extension sends no HELLO, closes the connection and exits with a non-zero status.
 
 The host's map: `proto_major` (int, 1), `proto_minor` (int, 0), `role` ("gameserver"), `name` (string), `version` (string),
-`server_name` (string), `epoch` (int, 1 for the first connection of the host's process, one more for each later one), `data_dir`
-(string: an absolute path the host created, where the extension keeps its files), `world_dir` (string: an absolute path the
-extension reads and never writes), `max_frame` (int), `call_timeout_ms` (int: how long the host waits for a reply, for information).
+`server_name` (string), `epoch` (int from 1 to 2^32 - 1: one more for every connection the host's process accepts, failed starts
+included; section 5), `data_dir` (string: an absolute path the host created, where the extension keeps its files), `world_dir`
+(string: an absolute path the extension reads and never writes), `max_frame` (int, at least 65,536), `call_timeout_ms` (int: the
+deadline of a normal request; the host may allow some operations longer, section 4.2).
 
-The extension's map: `proto_major`, `proto_minor`, `role` ("extension"), `name`, `version`, `features` (list of strings, optional
-capabilities; none in 1.0), `manifest` (map, section 6), and optionally `max_frame` (int).
+The extension's map: `proto_major` (int, 1), `proto_minor` (int), `role` ("extension"), `name` (string, equal to `extension.json`'s),
+`version` (string), `features` (list of strings, *optional*, default []: capabilities beyond 1.0; none are defined), `manifest` (map,
+section 6), `max_frame` (int, at least 65,536, *optional*: no further limit). The extension's HELLO must fit in 16,777,216 bytes and
+in the host's `max_frame`.
 
-**Versions.** A different `proto_major` on either side: the host closes the link and runs without the extension. A higher
-`proto_minor` is accepted; a side ignores map keys it does not know and answers an op it does not know with `unknown_op`.
+**Versions.** A `proto_major` of the extension that differs from the host's, or from `extension.json`'s `protocol`, is a failed start.
+A higher `proto_minor` on either side is accepted; a side ignores map keys it does not know.
 
 ### 4.2 REQ and REPLY
 
-- `reqid` starts at 1 on each connection and grows by 1 with every REQ. The REPLY to a REQ carries its `reqid`.
+- `reqid` starts at 1 on each connection and grows by 1 with every REQ. The REPLY to a REQ carries its `reqid`; a REPLY with another
+  `reqid` than the one REQ outstanding is a protocol error.
 - **One request at a time.** The host sends a REQ only when the REPLY to its previous REQ has been read. The extension answers REQs
   in the order they arrive, each with exactly one REPLY.
+- **Deadlines.** The host waits for a REPLY up to a deadline (`call_timeout_ms` for most operations; longer for some, as its design
+  says). When the deadline passes, the script's call fails, but the request stays outstanding: the host sends no other REQ until the
+  late REPLY arrives, then applies its effects, fires its events (deferred, section 11) and does not use its result.
 - `op` is an operation (section 7). `releases` lists handles the host no longer refers to (section 5). `ctx` is a map with `player`
-  (the account name of the player the call is made for, a string, or nil) and `level` (the level's name, or nil); other keys are
-  ignored. `args` are the operation's arguments.
+  (the account name of the player the running script acts for, a string, or nil) and `level` (the name of the running script's level,
+  or nil); the host always sends both keys; `ctx` describes the caller and may differ from the arguments. `args` are the operation's
+  arguments: exactly as many as section 7 or the manifest gives, each of its type or nil (section 6.3); another number is `bad_args`.
 - `status` is 0 for success or an error code (section 8). On success `result` is the operation's value. On an error `result` is a
   string that says what went wrong, `effects` and `events` are empty and `touched` is nil.
-- `effects` (section 10) and `events` (section 11) are what the host does after it has read the whole REPLY: first every effect in
-  order, then every event in order.
-- `touched` is nil in 1.0. (A later minor version may list the handles whose changeable members this request changed.)
+- `effects` (section 10) and `events` (section 11) are lists, applied by the host after it has read the whole REPLY: first every
+  effect in order, then every event in order. A REPLY carries at most 4,096 effects and events together; an extension pages larger
+  work over several requests.
+- `touched` is nil in 1.0. (A later minor version may list the handles whose changeable members the request changed.)
+- A REPLY that would not fit in the link's maximum is replaced by a REPLY with status `too_large`; what the operation changed in the
+  extension stays changed.
 
 ### 4.3 QUERY and QRESULT
 
-While a REQ is waiting for its REPLY, the extension may ask the host questions; the host answers each with a QRESULT before the
-extension's REPLY can arrive (the extension waits). `qid` starts at 1 on each connection and grows by 1 with every QUERY; the QRESULT
-carries it. A QUERY sent while no REQ is waiting is answered with status 4 (`unavailable`). Queries are reads: answering one changes
-nothing on the host and runs no script. The names are listed in section 12; an unknown name is answered with status 1.
+While a REQ is outstanding, the extension may ask the host questions. **At most one QUERY is outstanding**: the extension waits for
+its QRESULT, and sends no REPLY and no other QUERY before it. `qid` starts at 1 on each connection and grows by 1 with every QUERY;
+the QRESULT carries it.
+
+Queries are reads: answering one changes nothing on the host and runs no script. The host answers with status 4 (`unavailable`) a
+QUERY that comes while no REQ is outstanding, during `session.init`, `session.flush` and `session.shutdown`, and after the deadline
+of the outstanding REQ has passed. An unknown name is status 1, wrong arguments status 2. On a status other than 0 the `result` is a
+string; the extension fails its operation or uses a default. The names are in section 12.
 
 ### 4.4 PING and PONG
 
-Either side may send PING at any time after the HELLOs; the other answers PONG with the same `n` as soon as it reads it, even while it
-is busy with a request. The host uses it to tell a busy extension from a dead one.
+Either side may send PING after the HELLOs; the other answers PONG with the same `n` within 1 s, even while it is busy with a request
+(its reader must not wait for its worker). A PONG whose `n` the side did not send is ignored. **Silence:** while a REQ is
+outstanding, the host sends a PING after 2 s in which it read no frame, and again every 2 s; after 10 s without any frame (a PONG
+counts) the host closes the connection and treats the extension as stopped.
 
 ### 4.5 LOG
 
-The extension may send LOG at any time after the HELLOs. The host writes the text to its log at that level and may limit how many
+The extension may send LOG at any time after its HELLO. The host writes the text to its log at that level and may limit how many
 lines it keeps.
 
 ## 5. Handles
 
-A handle names an object of the extension: an unsigned 64-bit integer whose high 32 bits are the **epoch** the host sent in its HELLO
-and whose low 32 bits are the extension's **tag** for the object. Tag 0 is never used; the extension never reuses a tag within an
-epoch. A handle of another epoch is dead: the host treats it as nil, and the extension answers a request that names one with
-`bad_handle`.
+A handle names an object of the extension: an unsigned 64-bit integer whose high 32 bits are the **epoch** of the host's HELLO and
+whose low 32 bits are the extension's **tag** for the object.
 
-- The host may keep any handle it was given. When it no longer refers to one, it lists it in the `releases` of a later REQ (any REQ;
-  no request is sent for releases alone). The extension may then forget objects that nothing else holds; releasing an object that
-  still exists in the world (in a level, an inventory, an archetype) changes nothing.
-- A handle may appear only where this text or the manifest asks for one. The host turns a handle into a script object: the level NPC
-  that shows it, if the object has one (section 10, `npc.place`), else a proxy object of the type the manifest names. A script object
-  passed as an argument of a handle type is sent as its handle (a proxy's, a bound NPC's, or a player's from `player.login`); any
-  other value is sent as nil.
+- **One tag per object.** The extension gives an object one tag for as long as it holds the object, and every reply that names the
+  object carries that handle. Tag 0 is never used, and a tag is never used for a second object in one connection. When the tags of an
+  epoch are used up, the extension answers every request that would need a new tag with `internal`.
+- **Epochs.** A new process starts with no tags in use. The extension never gives a handle of another epoch than its connection's.
+  A handle of another epoch is dead: the host turns it into nil, the extension answers `bad_handle` where a live object is needed.
+- **Releases.** The host lists a handle in `releases` only when, at the moment it writes the REQ, it holds no script object for it
+  (so a handle it was given again in the meantime is not released). It sends at most 4,096 handles in one REQ and keeps the rest for
+  later REQs; it never sends a REQ for releases alone; `releases` is empty in `session.init`. The extension applies the releases
+  **before** the REQ's operation, ignores dead, unknown and never-issued handles in them, and may then forget an object that nothing
+  in its world holds; an object in a level, an inventory, a player or the archetypes keeps its tag. Handles of objects shown by level
+  NPCs (section 10) are never released.
+- **Typed handles.** A handle may appear where this text or the manifest gives a handle type. The host turns it into a script object:
+  the level NPC that shows the object, if one does; else the proxy object of the manifest type (section 6), one proxy per handle, so
+  that scripts can compare them. A handle in a place without a handle type (a value of type `any` or `list`, an event's `args`)
+  becomes the NPC that shows it, or nil. A script object passed as an argument of a handle type is sent as its handle (a proxy's, an
+  NPC's that shows an object, the player's from `player.login`); any other value is sent as nil.
 
 ## 6. The manifest
 
-The extension's HELLO carries a map `manifest` that tells the host which script functions, types, members, methods and events exist.
-The host registers them once per process; after a reconnection the manifest must be equal to the registered one, or the host runs
-without the extension until it restarts.
+The extension's HELLO carries a map `manifest` that says which script functions, types, members, methods and events exist. The host
+registers them once per process. After a reconnection the manifest must be equal to the registered one (as values: lists in order,
+maps without regard to the order of keys), or the host runs without the extension until it restarts.
 
 | Key | Value |
 | --- | --- |
-| `functions` | list of maps `{id, name, params, ret, slow}`: `id` an int of at least 64 (the op of the call, section 7); `name` the script function's name; `params` a list of type names; `ret` a type name; `slow` a bool (optional, false by default: the host allows a slow function a longer deadline) |
-| `types` | list of maps `{id, name, host, members, methods}`: `id` an int; `name` the script type's name (`objecttype()`); `host` one of `object` (a proxy script object of this type), `player` (members and methods on the host's player object; the handle is the one `player.login` gave), `npc` (members and methods on a level NPC that shows an object); `members` a list of maps `{id, name, type, access, stable}` (`access` "r" or "rw"; `stable` a bool, section 6.1); `methods` a list of maps `{id, name, params, ret}` |
-| `events` | list of maps `{name, target, mode}`: `target` one of `object`, `player`, `global`; `mode` `sync` or `deferred` (section 11) |
-| `wants_tick` | bool: the host sends `session.tick` (section 7) |
-| `limits` | map `{max_list}`: the most elements `get_list` returns |
+| `functions` | list of maps `{id, name, params, ret, slow}` (*optional*, default []): `id` an int from 64 to 2^31 - 1, unique; `name` the script function's name; `params` a list of type names; `ret` a type name; `slow` a bool (*optional*, default false: the host allows the function a longer deadline) |
+| `types` | list of maps `{id, name, host, members, methods}` (*optional*, default []): `id` an int from 1 to 2^31 - 1, unique; `name` the script type's name (what `objecttype()` gives), unique; `host` one of `object`, `npc`, `player` (section 6.2); `members` a list of maps `{id, name, type, access, stable}` (*optional*, default []), with `access` "r" or "rw" (*optional*, default "r") and `stable` a bool (*optional*, default false, section 6.1); `methods` a list of maps `{id, name, params, ret}` (*optional*, default []) |
+| `events` | list of maps `{name, target, mode}` (*optional*, default []): `name` unique; `target` one of `object`, `player`, `global`; `mode` `sync` or `deferred` (section 11) |
+| `wants_tick` | bool (*optional*, default false): the host sends `session.tick` |
+| `limits` | map `{max_list}` (*optional*): `max_list` an int from 1 to 4,096 (*optional*, default 256), the most rows `get_list` gives |
 
-Member and method ids are ints, unique within the whole manifest. Names are compared without regard to case by scripts; a manifest
-must not hold two functions, or two members or methods of one type, whose names differ only in case.
-
-**Type names:** `int`, `float`, `bool`, `string`, `any`, `void` (for `ret` only), `handle:<type>` (a handle whose script object is of
-the named manifest type), `list` (a list of `any`), `list:<type name>` (a list whose elements have that type; `list:handle:<type>`
-is allowed). The host converts a script's arguments to the declared types (numbers to int or float, other values to their text for
-`string`, truthiness for `bool`), sends exactly as many arguments as `params` names (nil for those the script left out; extra ones
-are dropped), and converts the result back.
+- **Ids.** Member and method ids are ints from 1 to 2^31 - 1, unique together across the whole manifest. Function, type and event
+  names, and the member and method names of one type, are unique when compared with ASCII case folding; names match
+  `[A-Za-z_][A-Za-z0-9_]*` and are at most 64 characters long. A name the host already uses for a built-in function, or for a built-in
+  property of the object the members land on (section 6.2), makes the manifest invalid.
+- **Type names:** `int`, `float`, `bool`, `string`, `any`, `void` (only as `ret`: the result is nil), `handle:<type>` (a handle whose
+  proxy is of the manifest type of that name, compared exactly; the type must exist), `list` (a list of `any`), `list:<type name>` (a
+  list whose elements have that type, any type name but `void`, so `list:handle:<type>` and `list:list:int` are allowed). Any other
+  name makes the manifest invalid.
+- A manifest that breaks this section is invalid: a failed start (section 1).
 
 ### 6.1 Stable members
 
-A member is **stable** when only a `set` through this link changes it: the extension promises never to change it by its own rules,
-timers or other requests. The host may answer a read of a stable member from what it last read or wrote, without a request. A member
-the extension's rules recompute (hit points, carried weight, a value that depends on other fields) must not be stable.
+A member is **stable** when its value changes only through a `set` of that member over this link: no other operation, method, event,
+tick, login or load changes it. The host may then answer a read from the value it last read, or the value the last `set` returned,
+without a request. A member that the extension's rules recompute (hit points, carried weight, a value that depends on other fields)
+must not be stable. The host forgets what it holds for a handle when a request for it fails, when a `set` or `invoke` on it passes
+its deadline, on `bad_handle`, `object.destroyed`, `npc.remove` and `level.unload`, and on a new connection.
+
+### 6.2 Where members land
+
+Every type has a **proxy** form: a script object of that type name with its members and methods. A type's `host` says where else they
+are:
+
+- `object`: only on the proxy.
+- `npc`: also on every level NPC of the host (the members of a script object are shared by all NPCs). On an NPC that shows no object
+  of this type, a member reads as nil and a method gives nil, without a request. At most one type has host `npc`.
+- `player`: also on the host's player objects, for the player of the handle `player.login` gave. At most one type has host `player`,
+  and `player.login` gives handles of that type; it must exist if the extension answers `player.login` with a handle.
+
+### 6.3 Arguments and results
+
+The host sends exactly as many arguments as `params` names, converted to the declared types: numbers as int or float (a script number
+for `any` as an int when it has no fraction and lies within ±2^53, else a float), other values as their text for `string`, truthiness
+for `bool`, a script array as a list, a script object as section 5 says. An argument the script left out is nil; any argument may
+be nil, and the extension reads nil as the zero of the declared type (0, 0.0, false, "", no object, []). A lookup that finds nothing
+returns nil, not an error. A result of another type than `ret` (after the conversion of numbers) is a failed call: the script gets
+the zero of `ret`, and the host logs it.
 
 ## 7. Operations
 
-Ops 1 to 63 are fixed; ops from 64 up are the manifest's functions. `args` and `result` are as the table says.
+Ops 1 to 63 are fixed (17 to 63 are reserved: the extension answers `unknown_op`); ops from 64 up are the manifest's functions (an id
+the manifest does not have is `unknown_op`).
 
 | Op | Name | Args | Result |
 | --- | --- | --- | --- |
-| 1 | `session.init` | `[]` | map `{archetypes: int}`; the first REQ of every connection; the extension loads its world |
-| 2 | `session.tick` | `[now_ms: int]` | nil; only with `wants_tick` |
-| 3 | `session.flush` | `[blobs]` | nil; the extension saves a snapshot (it may reply before the files are written, and must write them) |
-| 4 | `session.shutdown` | `[save: bool, blobs]` | nil, after the files are written when `save` is true; the last REQ |
-| 5 | `player.login` | `[account: string]` | the player's handle |
-| 6 | `player.logout` | `[account: string]` | nil; the effects remove every string the extension set for the player |
-| 7 | `level.load` | `[level: string, cursor]` | map `{more: bool, cursor}`; the first call has cursor nil; each call places at most 64 objects (as `npc.place` effects); the host calls again with the returned cursor until `more` is false |
-| 8 | `level.unload` | `[level: string, blobs]` | nil |
+| 1 | `session.init` | `[]` | a map; its keys are information only (the Crossfire extension sends `archetypes`, an int). The first REQ of every connection: the extension loads its world. Before its REPLY no other op is sent; a second `session.init` is `bad_args` |
+| 2 | `session.tick` | `[now_ms: int]` | nil. Only with `wants_tick`. `now_ms` is a monotonic count of milliseconds since the host's process started; the host sends a tick about every 100 ms when no other request is outstanding; the extension must use `now_ms`, not the number of ticks, as time |
+| 3 | `session.flush` | `[]` | nil. The extension saves a snapshot of everything it holds (it may reply before the files are written, and must write them) |
+| 4 | `session.shutdown` | `[save: bool]` | nil, after the files are written when `save` is true; with false it writes nothing. The last REQ: the host closes the connection after its REPLY |
+| 5 | `player.login` | `[account: string]` | the player's handle, or nil when the extension has no player for the account (the host then treats the player as one without a MUD part). An account it has no file for makes a new player. A second login of an account without a logout gives the same handle and sends the player's strings again. Accounts are compared as bytes, and `ctx.player` and every effect's `player` use the same string |
+| 6 | `player.logout` | `[account: string]` | nil. The effects delete every client string the extension set for the player (it remembers them); the player's handle is dead afterwards. For an account not logged in: nil, no effects |
+| 7 | `level.load` | `[level: string, cursor: any]` | a map `{more: bool, cursor: any}`. The first call has cursor nil; each call gives at most 64 `npc.place` effects for this level; the host calls again with the returned cursor (opaque to it, at most 1,024 bytes encoded) until `more` is false, and may send other REQs between two calls. A level the extension knows nothing of, or whose objects are already placed, gives `{more: false, cursor: nil}` and no effects |
+| 8 | `level.unload` | `[level: string]` | nil. The extension saves the level's objects and forgets them; their handles are dead afterwards, and a later `level.load` gives new ones. No `npc.remove` effects: the host removes the NPCs itself |
 | 9 | `get` | `[handle, member: int]` | the member's value |
-| 10 | `set` | `[handle, member: int, value]` | the value stored (the extension may clamp it) |
-| 11 | `get_many` | `[handle, members: list of int]` | list of the values, in order |
-| 12 | `get_list` | `[handle, member: int, fields: list of int]` | list of lists `[element handle, value of each field...]` for the list-typed member, at most `max_list` |
-| 13 | `invoke` | `[handle, method: int, args: list]` | the method's value |
-| 14 | `object.destroyed` | `[handle]` | nil; a script destroyed the NPC that showed the object |
-| 15 | `stats` | `[]` | map of the extension's counters (names and meaning are its own) |
+| 10 | `set` | `[handle, member: int, value: any]` | the value stored (the extension may clamp it; a stable member is never changed again but by `set`) |
+| 11 | `get_many` | `[handle, members: list of int]` | a list of the values, in order |
+| 12 | `get_list` | `[handle, member: int, fields: list of int]` | for a member of type `list:handle:<T>`: a list of rows `[element handle, value of each field in order]` (`fields` are members of T; `[]` gives rows of one element). More rows than `max_list` is `too_large` (the host then reads the member with `get`) |
+| 13 | `invoke` | `[handle, method: int, args: list]` | the method's value (`args` as its `params`) |
+| 14 | `object.destroyed` | `[handle]` | nil. A script destroyed the NPC that showed the object: the extension destroys the object as its own rules would (its effects and events follow), and its handle is dead afterwards |
+| 15 | `stats` | `[]` | a map of the extension's counters (names and meanings are its own) |
+| 16 | `objects.blobs` | `[blobs]` | nil. `blobs` is a list of rows `[handle, x: number, y: number, blob: string]`: for objects shown by level NPCs, the NPC's position in tiles and its script state as text, which the extension stores with the object without reading it, replacing the row it had, and gives back in the `npc.place` that shows the object again. The host sends the rows of a level's NPCs before `level.unload`, and of every NPC that shows an object before `session.flush` and `session.shutdown`, in as many requests as the frame limit needs. Rows for dead or unknown handles are ignored |
 | 64+ | a manifest function | as its `params` | as its `ret` |
 
-`blobs` is a list of lists `[handle, x: float, y: float, blob: string]`: the position of each level NPC that shows an object, and the
-NPC's script state as text, which the extension stores with the object without reading it and gives back in the `npc.place` effect
-that shows the object again.
+**Handles in requests.** Where an operation needs a live object, a nil, dead, never-issued or wrong-epoch handle is `bad_handle`. A
+member or method id that does not exist or does not belong to the object's type, or a `set` of a member with `access` "r", is
+`bad_args`; `get_many` and `get_list` with any bad id fail as a whole. A `set` value of another type is converted as section 3.2 says
+for numbers, else it is `bad_args`.
 
 ## 8. Error codes
 
@@ -215,59 +290,79 @@ that shows the object again.
 | --- | --- | --- |
 | 0 | ok | |
 | 1 | `unknown_op` | the op, or a query's name, is not known |
-| 2 | `bad_args` | wrong number or types of arguments |
-| 3 | `bad_handle` | a handle is dead or unknown |
-| 4 | `unavailable` | not ready (before `session.init` finished), or a query with no request waiting |
-| 5 | `too_large` | the answer would exceed the frame's maximum |
+| 2 | `bad_args` | wrong number or types of arguments, or an id that does not fit |
+| 3 | `bad_handle` | a handle is dead, unknown or nil where an object is needed |
+| 4 | `unavailable` | not ready, or a query the host does not answer now (section 4.3) |
+| 5 | `too_large` | the answer would not fit |
 | 6 | `version` | a version the side does not speak |
 | 7 | `busy` | the side cannot take the request now |
 | 8 | `internal` | anything else |
 
+Every status but 0 fails the call: the script gets the zero of its type, and the host logs it (and limits how often). An unknown
+status counts as `internal`.
+
 ## 9. Protocol errors
 
-A malformed frame (a length out of range, an unknown kind or tag, a count past the end, a depth over 16, bytes after the last field, a
-duplicate key, a varint too long) or a frame sent when section 4 does not allow it is a **protocol error**: the receiver closes the
-connection. The host then treats the extension as stopped (its design restarts it); the extension saves and exits.
+These are protocol errors: a frame length out of range; an unknown kind or tag; a body that ends inside a field; a count or byte count
+past the end; a depth over 16; bytes after the last field; a duplicate key; a varint over 10 bytes or over 64 bits; a field of the
+wrong type; a frame sent when section 4 does not allow it (among them a REPLY with the wrong `reqid`, a QUERY while one is
+outstanding, a REQ after `session.shutdown`'s REPLY). The side that reads one closes the connection. The host then treats the extension
+as stopped (its design restarts it); the extension saves and exits (section 1).
 
 ## 10. Effects
 
-An effect is a map whose key `k` names it. The host applies the effects of a REPLY in order after reading it. An effect with an
-unknown `k` is skipped (and counted).
+An effect is a map whose key `k` (a string) names it. The host applies the effects of a REPLY in order after reading it. An element
+that is not a map, an unknown `k`, a known effect with a missing or wrongly typed key, an effect for a player who is not online, and an
+effect for a level that is not loaded are skipped and counted; the host never loads a level for an effect.
 
 | `k` | Keys | What the host does |
 | --- | --- | --- |
-| `npc.place` | `handle`, `level` (string), `x`, `y` (numbers, in tiles), `image` (string), `classes` (list of strings), `props` (map of script property names to values), `blob` (string or nil) | shows the object as an NPC of the level, joined to the classes, with the props set and the script state restored from `blob`; the NPC's `onCreated` runs in the host's next script frame |
+| `npc.place` | `handle`, `type` (a manifest type name), `level` (string), `x`, `y` (numbers, in tiles, fractions allowed), `image` (string), `classes` (list of strings), `props` (map), `blob` (string or nil) | shows the object as an NPC of the level, joined to the classes (a class the host does not have is skipped), with `props` set and its script state restored from `blob`; the NPC's `onCreated` runs in the host's next script frame. For an object already shown it moves that NPC (level, x, y) and sets `image`, `classes` and `props`, keeping its script state and ignoring `blob`. Inside a `level.load`, `level` must be the loaded level |
 | `npc.remove` | `handle` | removes the NPC that shows the object, without events |
-| `npc.setprop` | `handle`, `name`, `value` | sets a property of the NPC that shows the object |
-| `client.set` | `player` (account), `name`, `value` (string) | sets the player's string `name`, the whole flag name with its prefix (`clientr.mud_hp`, `client.mud_item12`); a name that starts with neither `client.` nor `clientr.` is skipped |
-| `client.del` | `player`, `name` | deletes that client string |
-| `client.text` | `player`, `text` | shows the text to the player (its chat or information line) |
-| `client.item` | `player`, `fields` (map) | an item update for the player's client in the host's own form (reserved in 1.0) |
-| `output` | `player`, `text` | as `client.text` (reserved) |
+| `npc.setprop` | `handle`, `name` (string), `value` | sets one property of the NPC that shows the object |
+| `client.set` | `player` (account), `name` (string), `value` | sets the player's string `name`, the whole flag name with its prefix (`clientr.mud_hp`, `client.mud_item12`), to `value` as text |
+| `client.del` | `player`, `name` | deletes that string |
+| `client.text` | `player`, `text` (string) | shows the text to the player as an RPG message (what the script function `player.sendrpgmessage` does) |
+| `client.item`, `output` | | reserved: the extension must not send them in 1.0, and the host skips them |
+
+**Property names** in `props` and `npc.setprop`: a name `this.<variable>` sets that script variable of the NPC (the variable's name
+matching `[A-Za-z_][A-Za-z0-9_]*`); of the NPC's own properties only `image`, `ani`, `nick` and `dir` may be set. Any other name is
+skipped and counted; position and level change only through `npc.place`. A `client.set` or `client.del` name that starts with neither
+`client.` nor `clientr.` is skipped. An `npc.remove` or `npc.setprop` for an object no NPC shows is skipped.
 
 ## 11. Events
 
-An event is a map `{name, target, handle | player, args}`: `name` a manifest event, `target` as the manifest says, `handle` the
-object (for `object`), `player` the account (for `player`), `args` a list. The host fires the events of a REPLY in order after its
-effects, as script events (`onUpdateObject` and so on) of the NPC that shows the object, of the player, or of the global script
-objects. With mode `sync` they run at once, before the call that caused them returns to the script; with `deferred` in the host's
-next script frame. An event for an object no NPC shows is dropped. A script run by an event may make requests of its own (new REQs,
-after this REPLY).
+An event is a map: `name` (string, a manifest event), `target` (the manifest's target for it), `handle` (only for target `object`),
+`player` (the account, only for target `player`), `args` (list). The host fires the events of a REPLY in order after its effects:
+
+- `object`: the event runs on the level NPC that shows the object (`this` is the NPC), with `args` as the parameters.
+- `player`: the event runs on the player's object (`this` is the player, through the classes the player joined), with `args`.
+- `global`: the event runs on every global script object of the host (its database NPCs and control NPC) that defines it, with `args`.
+
+With mode `sync` an event runs at once, before the call that caused it returns to the script; with `deferred` it runs in the host's
+next script frame. The events of a late REPLY, and `sync` events nested more than 8 deep, run deferred. A script run by an event may
+make requests of its own: each is a new REQ, sent after the REPLY that fired the event was read, and its own effects and events are
+applied at its own REPLY, before the remaining events of the first. An event with an unknown name, a target other than the manifest's,
+a missing key, an object no NPC shows, or a player who is not online is skipped and counted.
 
 ## 12. Queries
 
 | Name | Args | Result |
 | --- | --- | --- |
-| `level.near` | `[level: string, x, y, r]` | list of `[handle, x, y]`: the NPCs showing objects within `r` tiles of (x, y) |
-| `level.blocked` | `[level: string, x, y]` | bool: the tile is blocked for walking |
-| `npc.pos` | `[handles: list]` | list of `[x, y, level]` (nil for an object no NPC shows), in order |
+| `level.near` | `[level: string, x, y, r]` (numbers, in tiles) | a list of rows `[handle, x, y]`, the NPCs showing objects within `r` tiles of (x, y), nearest first, at most 1,000; `[]` for a level that is not loaded |
+| `level.blocked` | `[level: string, x, y]` | bool: the tile is blocked for walking; true for a level that is not loaded |
+| `npc.pos` | `[handles: list]` | a list of rows `[x, y, level]` in order, nil for an object no NPC shows |
 | `player.exists` | `[account: string]` | bool: the player is online |
 | `level.loaded` | `[level: string]` | bool |
+
+The handles in query results name objects shown by NPCs; they are not references the host must release.
 
 ## 13. Golden vectors
 
 The frames below are complete (length and body), written in hexadecimal. Both implementations must encode these exact bytes from the
-values given and decode them back. They come from the reference encoder that made this text.
+values given and decode them back. They come from the reference encoder that made this text. REPLY 4 and REPLY 5 answer requests
+that are not shown; REQ 3 releases a handle that was never issued, which the extension ignores. REPLY 5 shows the encoding of an effect and an event only:
+its event is not in the example manifest, so a host would skip it.
 
 ### 13.1 Values
 
