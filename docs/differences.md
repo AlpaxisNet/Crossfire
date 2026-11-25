@@ -39,6 +39,35 @@ key spelled as the loader has no rule for it (`resist_blindness`, `resist_life_s
   the text of the `animations` file, `load_object` a `LoadSource`; `save_object` writes into a `StringBuilder`; `dump_object` returns the text.
   `load_object_str` reads the string instead of a temporary file.
 
+## Names, descriptions and prices (common/item.c, server/shop.c)
+
+- **Strings, not static buffers.** `query_name`, `query_short_name`, `query_base_name`, `describe_item`, `ring_desc`, `describe_resistance`,
+  `describe_monster`, `query_weight`, `get_levelnumber`, `get_number` and `cost_string_from_value` return strings; C returns a pointer into a
+  static buffer (`query_name` cycles through five). The text is the same; the buffers' sizes are kept where they cut the text
+  (`safe_strcat` with 4096 for `query_short_name` and `query_name`, 1024 for `ring_desc`, 256 for `query_base_name`), and the slip in
+  `safe_strcat` (`*curlen=maxlen=1`: after an overflow the length is 1, not the buffer's size, so the next piece is written from the
+  second character on) is ported as it is. The pieces that C writes with `strcat` and `sprintf` and no check (`describe_item`,
+  `describe_monster`, the stat pieces of `ring_desc`) are not cut: C overflows its 1024 buffer there, which no object reaches.
+- **`%f` is exact.** `query_weight` (`%6.1f`) and `describe_item` (`%1.2f`) go through `CStr.FormatFixed`, which rounds the exact binary value with
+  ties to the even digit as glibc does (.NET would round 0.25 to "0.3", C prints "0.2"). `%+d` is `CStr.Plus`.
+- **A stack without a plural name** (`nrof` other than 1, `name_pl` NULL): C copies a NULL pointer and crashes. `query_short_name` logs an
+  error and uses the empty string. (Objects read by the loader always have one: the `name` rule of `loader.l` sets it to the name when there is none.)
+- **`spells[]`** is the host's (`CrossfireHost.SpellName`, `SpellCharges`). The default host has no spell table: names are "" and a wand
+  holds `max(1, 0)` charges, so a scroll shows as "scroll of  (lvl 3)" until the spell phase supplies the table. A spell number outside the table
+  (`stats.sp` is -1 after `identify` of an unknown spellbook) is "" where C reads whatever lies before the table.
+- **A player without a controller** (`op->contr` NULL, type `PLAYER`) shows no regeneration pieces in `describe_item`; C dereferences NULL.
+- **`get_levelnumber` and `get_number` of a negative number** are "" (C reads before its tables).
+- **`isqrt`** keeps its sum in 64 bits: with the C `int` an argument near 2^31 would wrap the sum and never end.
+- **`query_cost` and a charisma outside the table** (a player's `Cha` under 0, or over 30 without the bargaining skill cap, e.g. 40):
+  C reads outside `cha_bonus`; the port takes it as the C code's own "illegal charisma bonus" case (an error is logged, `diff` is 0.9).
+  The error text prints the bonus as an integer; C prints a `float` with `%d`, which is garbage.
+- **`cost_string_from_value`** with a coin archetype of value 0 divides by zero as C does (a `DivideByZeroException`); the coins of
+  Crossfire's archetypes never have value 0.
+- **Quirks kept on purpose** (do not "fix"): `query_base_name` of a plain item returns the singular name even when the plural was asked for;
+  an object with `nrof` 0 and a weight uses its plural name; `query_cost` truncates `4.0*(float)val*(1.0-diff)` (a sale at charisma 30 of
+  1000 gives 3199, not 3200); `query_cost` of a wand with an unknown spell divides by 1; "Spell forumla for" is the C spelling; `cost_string_from_value` says
+  "nothing" when the platinum coin archetype is missing even if gold and silver exist.
+
 ## Places where C would crash or read garbage
 
 - `editable` on an object that has no archetype (a nested block inside an archetype: its archetype cannot be found yet, as the table is

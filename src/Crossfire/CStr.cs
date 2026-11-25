@@ -161,4 +161,53 @@ public static class CStr
 
     /// <summary>C <c>%f</c> of a double.</summary>
     public static string Fmt(double d) => d.ToString("F6", CultureInfo.InvariantCulture);
+
+    /// <summary>C <c>%+d</c>: the number with its sign, also for 0 ("+0").</summary>
+    public static string Plus(int n) => n < 0 ? n.ToString(CultureInfo.InvariantCulture) : "+" + n.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// C <c>%.Nf</c> of a finite double as glibc prints it: the exact value of the binary number rounded to
+    /// <paramref name="precision"/> decimals, a tie going to the even digit (.NET rounds a tie away from zero, so
+    /// <c>0.25</c> is "0.3" there and "0.2" in C).
+    /// </summary>
+    public static string FormatFixed(double d, int precision)
+    {
+        long bits = BitConverter.DoubleToInt64Bits(d);
+        bool neg = bits < 0;
+        int exp = (int)((bits >> 52) & 0x7FF);
+        long frac = bits & 0xFFFFFFFFFFFFFL;
+        System.Numerics.BigInteger m;
+        int e;
+        if (exp == 0)
+        {
+            m = frac;
+            e = -1074;
+        }
+        else
+        {
+            m = frac | (1L << 52);
+            e = exp - 1075;
+        }
+        System.Numerics.BigInteger scaled = m * System.Numerics.BigInteger.Pow(10, precision);
+        System.Numerics.BigInteger q;
+        if (e >= 0)
+        {
+            q = scaled << e;
+        }
+        else
+        {
+            System.Numerics.BigInteger den = System.Numerics.BigInteger.One << -e;
+            q = System.Numerics.BigInteger.DivRem(scaled, den, out System.Numerics.BigInteger r);
+            int cmp = (r * 2).CompareTo(den);
+            if (cmp > 0 || (cmp == 0 && !q.IsEven))
+            {
+                q += 1;
+            }
+        }
+        string digits = q.ToString(CultureInfo.InvariantCulture).PadLeft(precision + 1, '0');
+        string text = precision == 0
+            ? digits
+            : digits.Substring(0, digits.Length - precision) + "." + digits.Substring(digits.Length - precision);
+        return neg ? "-" + text : text;
+    }
 }

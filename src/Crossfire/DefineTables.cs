@@ -124,6 +124,15 @@ public static class Tables
     /// <summary>living.c: short_stat_name.</summary>
     public static readonly string[] ShortStatName = { "Str", "Dex", "Con", "Wis", "Cha", "Int", "Pow" };
 
+    /// <summary>living.c: cha_bonus (a C <c>float</c> table): the price factor of a charisma of 0 to MAX_STAT.</summary>
+    public static readonly float[] ChaBonus =
+    {
+        10.0f, 10.0f, 9.0f, 8.0f, 7.0f, 6.0f,
+        5.0f, 4.5f, 4.0f, 3.5f, 3.0f, 2.9f, 2.8f, 2.7f, 2.6f, 2.5f,
+        2.4f, 2.3f, 2.2f, 2.1f, 2.0f, 1.95f, 1.90f, 1.85f, 1.80f, 1.75f,
+        1.70f, 1.65f, 1.60f, 1.55f, 1.50f,
+    };
+
     /// <summary>spellist.h: spellpathnames.</summary>
     public static readonly string[] Spellpathnames =
     {

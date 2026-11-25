@@ -28,7 +28,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | include/attack.h | `resist_save`, `attacktype_desc`, `resist_plus`, `change_resist_msg`, `resist_table`, `num_resist_table` | `Tables.ResistSave`, `AttacktypeDesc`, `ResistPlus`, `ChangeResistMsg`, `ResistTable`, `NumResistTable` | ported |
 | include/attack.h | `attack_mess` (the attack messages table) | none | not ported: filled from `lib/attackmess` by the attack code (a later phase) |
 | include/material.h | `M_*`, `NROFMATERIALS`, `materialtype` | `Define.M_*`, `MaterialType` | ported |
-| common/item.c | `material[NROFMATERIALS]` | `Tables.Material` | ported (the data; the functions of item.c are a later phase) |
+| common/item.c | `material[NROFMATERIALS]` | `Tables.Material` | ported (the data; the functions of item.c are in the next section) |
 | common/living.c | `attacks`, `statname`, `short_stat_name` | `Tables.Attacks`, `Statname`, `ShortStatName` | ported |
 | include/spellist.h | `spellpathnames` | `Tables.Spellpathnames` | ported (the spell list itself is a later phase) |
 | include/plugin.h | `EVENT_*`, `NR_EVENTS` | `Define.EVENT_*` | ported (the plugin machinery is not) |
@@ -85,7 +85,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | C function | C# member | Status |
 | --- | --- | --- |
 | `find_archetype_by_object_name`, `get_archetype_by_object_name` | `CfWorld.FindArchetypeByObjectName`, `GetArchetypeByObjectName` | ported |
-| `find_best_weapon_used_match`, `item_matched_string` | `CrossfireHost.FindBestWeaponUsedMatch` | not ported: need `query_name` and the player's count (common/item.c, c_object.c); the loader calls the host when `current_weapon_script` is set |
+| `find_best_weapon_used_match`, `item_matched_string` | `CrossfireHost.FindBestWeaponUsedMatch` | not ported: need the player's count (c_object.c's `count`; `query_name` is `CfWorld.QueryName` now); the loader calls the host when `current_weapon_script` is set |
 | `init_archetypes` | `CfWorld.InitArchetypes(text)` | ported |
 | `arch_info` | `CfWorld.ArchInfo` | ported (returns the text; C sends it to the player with `draw_info`) |
 | `clear_archetable`, `init_archetable` | `CfWorld.ClearArchetable`, `InitArchetable` | ported |
@@ -132,6 +132,53 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | common/living.c | `fix_player` | `CrossfireHost.FixPlayer` | not ported: the player's stats are the next phase |
 | common/treasure.c | `load_treasures`, the treasure lists | `CrossfireHost.LoadTreasures`, `FindTreasureList` | not ported here (the treasure phase); the default host knows every name |
 | include/player.h, include/map.h | `struct pl`, `mapdef` | `IPlayerHandle`, `IMapHandle` | not ported: markers that the owner implements |
+
+### common/item.c (names and descriptions of items)
+
+| C function | C# member | Status |
+| --- | --- | --- |
+| `numbers`, `numbers_10`, `levelnumbers`, `levelnumbers_10` | private tables of `CfWorld` | ported (the C spellings "fourty", "eighteen", "nineteen" stay) |
+| `describe_resistance` | `CfWorld.DescribeResistance` | ported (both forms: "(resist fire +30)" and "resist fire 30" lines) |
+| `query_weight` | `CfWorld.QueryWeight` | ported (`%6.1f` through `CStr.FormatFixed`: ties go to the even digit as in glibc) |
+| `get_levelnumber`, `get_number` | `CfWorld.GetLevelnumber`, `GetNumber` | ported (a negative number gives "": C reads outside its table) |
+| `ring_desc` | `CfWorld.RingDesc` | ported (`DESCRIBE_PATH_SAFE` with the 1024 buffer) |
+| `query_short_name` | `CfWorld.QueryShortName` | ported (4096 buffer, `FULL_RING_DESCRIPTION` is defined as in config.h; the spell name is `CrossfireHost.SpellName`) |
+| `query_name` | `CfWorld.QueryName` | ported (the five rotating static buffers are not needed for strings) |
+| `query_base_name` | `CfWorld.QueryBaseName` | ported (256 buffer) |
+| `describe_monster` (static) | `CfWorld.DescribeMonster` (private) | ported; `contr->digestion`, `gen_grace`, `gen_sp`, `gen_hp` are `CrossfireHost.PlayerDigestion`, `PlayerGenGrace`, `PlayerGenSp`, `PlayerGenHp`; the `ABILITY` items of `randomitems->items` are `CrossfireHost.TreasureAbilityNames` (the treasure phase) |
+| `describe_item` | `CfWorld.DescribeItem` | ported |
+| `is_magical`, `need_identify` | `CfWorld.IsMagical`, `NeedIdentify` | ported |
+| `look_up_spell_name` | `CfWorld.LookUpSpellName` | ported; the `spells[]` table is `CrossfireHost.SpellName` (the spell phase; the default host has no spells) |
+| `identify` | `CfWorld.Identify` | ported; `update_object` is `CrossfireHost.UpdateObject`, `esrv_send_item_func` is `CrossfireHost.EsrvSendItem` |
+| `material[]` | `Tables.Material` | ported (earlier phase) |
+
+### server/shop.c (prices and the texts of money)
+
+| C function | C# member | Status |
+| --- | --- | --- |
+| `coins`, `NUM_COINS` | private `CfWorld.Coins`, `NumCoins` | ported |
+| `query_cost` | `CfWorld.QueryCost` | ported (32-bit `int` arithmetic wraps; `spells[].charges` of a wand is `CrossfireHost.SpellCharges`; `cha_bonus` is `Tables.ChaBonus`; `find_skill`, `isqrt` below) |
+| `find_next_coin` (static) | `CfWorld.FindNextCoin` (private) | ported |
+| `cost_string_from_value` | `CfWorld.CostStringFromValue` | ported (returns the text; no static buffer) |
+| `query_cost_string` | `CfWorld.QueryCostString` | ported |
+| `query_money` | `CfWorld.QueryMoney` | ported |
+| `pay_for_amount`, `pay_for_item`, `pay_from_container`, `get_payment2`, `get_payment`, `sell_item` | none | not ported: they take coins out of inventories and send the changes to the client of Crossfire (`esrv_del_item`, `fix_player`, `draw_info`, the shop map squares); the price they use is `QueryCost` |
+| `shop_sort`, `add_shop_item`, `shop_listing` | none | not ported: the listing of the shop's map squares to a player |
+
+### What the two files above call (other files)
+
+| C file | C name | C# member | Status |
+| --- | --- | --- | --- |
+| include/define.h | `safe_strcat` | `CfWorld.SafeStrcat` | ported, with the C slip `*curlen=maxlen=1` (the length restarts at 1 when the text overflows) |
+| include/define.h | `DESCRIBE_ABILITY`, `DESCRIBE_PATH`, `DESCRIBE_PATH_SAFE` | `CfWorld.DescribeAbility`, `DescribePath`, `DescribePathSafe` | ported (`DESCRIBE_ABILITY_SAFE` is not used by the code of this phase) |
+| include/define.h | `ARMOUR_SPEED`, `ARMOUR_SPELLS`, `WEAPON_SPEED`, `FABS` | `CfObject.LastSp`, `LastHeal`, `Math.Abs` | ported (used in place) |
+| include/skills.h | `enum skillnrs` | `Define.SK_STEALING` .. `Define.SK_LEVITATION` | ported (the `skills[]` table is not) |
+| common/living.c | `get_attr_value`, `cha_bonus` | `CfWorld.GetAttrValue`, `Tables.ChaBonus` | ported |
+| common/player.c | `find_skill`, `atnr_is_dragon_enabled`, `is_dragon_pl` | `CfWorld.FindSkill`, `AtnrIsDragonEnabled`, `IsDragonPl` | ported |
+| common/porting.c | `isqrt` | `CfWorld.Isqrt` | ported (64-bit sum, see differences) |
+| (C runtime) | `%+d`, `%.Nf` | `CStr.Plus`, `CStr.FormatFixed` | not ported from a Crossfire file; the behaviour of `printf` that item.c relies on |
+| include/spells.h | `spells[]` (`name`, `charges`) | `CrossfireHost.SpellName`, `SpellCharges` | not ported: the spell table is a later phase |
+| include/player.h | `struct pl` (`digestion`, `gen_*`) | `CrossfireHost.PlayerDigestion` .. | not ported: the player is the next phase |
 
 ## How to read the table
 

@@ -127,6 +127,35 @@ public class CrossfireHost
     /// <summary>map.h <c>MAP_DARKNESS(map)</c>.</summary>
     public virtual int MapDarkness(IMapHandle map) => 0;
 
+    /// <summary>
+    /// include/spells.h <c>spells[index].name</c> (common/item.c <c>query_short_name</c>, <c>query_base_name</c>,
+    /// <c>look_up_spell_name</c>): the name of the spell with that number; null when the table has no such spell (C would read
+    /// whatever lies there). The spell table is a later phase: this default has no spells, and returns the empty string for every
+    /// number (so a scroll shows as "scroll of  (lvl 3)"), which is what an empty name gives.
+    /// </summary>
+    public virtual string? SpellName(int index) => "";
+
+    /// <summary>include/spells.h <c>spells[index].charges</c> (server/shop.c <c>query_cost</c> of a wand): the most charges a wand of that spell has. Default: 0 (no spell table yet).</summary>
+    public virtual int SpellCharges(int index) => 0;
+
+    /// <summary>include/player.h <c>contr-&gt;digestion</c> (common/item.c <c>describe_monster</c>).</summary>
+    public virtual int PlayerDigestion(IPlayerHandle contr) => 0;
+
+    /// <summary>include/player.h <c>contr-&gt;gen_grace</c> (common/item.c <c>describe_monster</c>).</summary>
+    public virtual int PlayerGenGrace(IPlayerHandle contr) => 0;
+
+    /// <summary>include/player.h <c>contr-&gt;gen_sp</c> (common/item.c <c>describe_monster</c>).</summary>
+    public virtual int PlayerGenSp(IPlayerHandle contr) => 0;
+
+    /// <summary>include/player.h <c>contr-&gt;gen_hp</c> (common/item.c <c>describe_monster</c>).</summary>
+    public virtual int PlayerGenHp(IPlayerHandle contr) => 0;
+
+    /// <summary>
+    /// include/treasure.h, common/item.c <c>describe_monster</c>: the names (<c>item-&gt;clone.name</c>) of the items of the
+    /// treasure list that have type ABILITY, in the order of the list. The treasure lists are a later phase: default, none.
+    /// </summary>
+    public virtual IEnumerable<string> TreasureAbilityNames(TreasureList list) => Array.Empty<string>();
+
     /// <summary>arch.c <c>find_best_weapon_used_match</c> (needs item.c's name matching, not ported).</summary>
     public virtual CfObject? FindBestWeaponUsedMatch(CfObject player, string parameters) => null;
 }
