@@ -13,11 +13,17 @@ the Crossfire file and functions it comes from and keeps their copyright notices
 Crossfire is copyright (C) 1992 Frank Tore Johansen, (C) 2001 Mark Wedel and the Crossfire Development Team, and the authors named
 in each file.
 
+**How it runs**: as the **Crossfire extension**, a program of its own that a game server starts and talks to over a Unix socket,
+with the protocol in [docs/protocol.md](docs/protocol.md). The game server does not link this code, and this repository holds none
+of the game server's: both sides implement that text. The protocol's text is under CC0 1.0 (its own header says so), so that any
+implementation may carry it; everything else here is under the GPL as above.
+
 **What it holds**: the ported code, its tests, Crossfire's data files of that commit that the rules need (treasure lists,
 artifacts, recipes, attack messages), and documentation. Nothing of Graal Kingdoms' world files (the GameServer reads them from the
 world's folder), and nothing of the Alpaxis network (no addresses, accounts, keys or tokens).
 
-The design, the decisions behind it and the phases are in the Alpaxis Suite's `server/docs/gk-mudlib.md`.
+The design, the decisions behind it and the phases are in the Alpaxis Suite's `server/docs/gk-mudlib.md` and
+`server/docs/mud-extension.md` (the game server's side of the protocol).
 
 ## What is here
 
