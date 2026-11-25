@@ -31,6 +31,10 @@ The design, the decisions behind it and the phases are in the Alpaxis Suite's `s
   `common/object.c`, `common/arch.c`, `common/loader.l` (`CfWorld`), the `.arc` reader and saver, the animation and face tables, and
   `ArchCollector` (what `lib/collect.pl` does to the archetype folder). Maps, players and their client, treasures and items are not
   ported: the code calls a `CrossfireHost` where C calls them.
+- `src/Crossfire.Extension`: the extension itself (the executable `Crossfire.Extension --connect <socket>`): its own codec and link
+  for [docs/protocol.md](docs/protocol.md), the loading of the archetypes and the manifest functions `findarchetype` and
+  `findarchetypebyrealname` with the type `TMudArch`; the Graal Kingdoms adaptation is in its `Gk` folder. What it does and the
+  table of its members: [docs/extension.md](docs/extension.md). Tests: `tests/Crossfire.Extension.Tests`.
 - `tests/Crossfire.Tests`: xunit tests; two of them read Graal Kingdoms' own archetypes when the environment variable
   `CROSSFIRE_GK_ARCH` names their folder (the `Arch` folder of its world, not part of this repository) and report how many
   `Object` blocks, unknown keys and errors they find.

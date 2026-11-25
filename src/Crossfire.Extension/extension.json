@@ -1,0 +1,8 @@
+{
+  "name": "crossfire",
+  "version": "0.1.0",
+  "protocol": 1,
+  "executable": "Crossfire.Extension",
+  "licence": "GPL-2.0-or-later",
+  "source": "https://github.com/AlpaxisNet/Crossfire"
+}
