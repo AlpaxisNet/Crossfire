@@ -5,14 +5,20 @@ quirks included (a few of those are listed at the end, so that nobody "fixes" th
 
 ## Keys the loader does not know are kept (Graal Kingdoms)
 
-The scanner of `common/loader.l` ignores a line it has no rule for (flex echoes it to stdout). Graal Kingdoms' archetypes have such
-lines, and a game server needs them: `graalnpctype` (1,325 objects) and `graalnpcparam` (700) decide the class and the look of an object,
+The scanner of `common/loader.l` ends with the rule `.*`, which takes a line no other rule matched: it logs
+`Unrecognized string: <the line>` as an error, sets `lex_error`, and the line is lost; `lex_load` then returns -1 instead of
+`LL_EOF` when it meets the end of the text (a block ended by `end` returns `LL_NORMAL` all the same). The port does all of that, and
+two things more. Graal Kingdoms' archetypes have such lines, and a game server needs them: `graalnpctype` (1,325 objects) and `graalnpcparam` (700) decide the class and the look of an object,
 `flag gender=male` and `flag arms=...` (218, the key repeats in a block), `hpbuff`, `spbuff`, `gracebuff`, `castingtime`,
 `restrictaccess`, `nopeaceful` and others. **The port keeps every such line on the object**: `CfObject.Extra` is an `ExtraKeys`, a list
 of (key, value) pairs in file order; a key may repeat; keys are compared without regard to case (the scanner is case-insensitive)
 but the spelling of the file is kept; the value is read as the C `yval` reads one (the blanks around it are cut). `copy_object`
 copies them with the object, `clear_object` clears them, `get_ob_diff`/`save_object` write the ones an archetype does not have, and
-`CfWorld.UnknownKeys` counts them by key. Comment lines (`#`) and blank lines are not kept.
+`CfWorld.UnknownKeys` counts them by key. Comment lines (`#`), empty lines and lines of blanks are not kept (a line of blanks is an
+unrecognized line in C as well). And **a key the host's loader reads** (`CrossfireHost.IsLoaderKey`, false for every key by
+default) is no error: Graal Kingdoms' server had rules for its own keys, so its host names them (`graalnpctype`, `graalnpcparam`,
+`flag`, `hpbuff`, `spbuff`, `gracebuff`, `castingtime`, `restrictaccess`, `nopeaceful`) and only its misspelled keys and broken
+messages (below) are logged.
 
 Three consequences that follow from C's rules, not from the port: `msg <edit msg>` (three blocks of `Weapon/Sword/graalswords.arc`) is
 not the start of a message (C needs `msg` alone on its line), so its text lines are unknown lines too and `endmsg` an unknown key; a
@@ -108,6 +114,9 @@ key spelled as the loader has no rule for it (`resist_blindness`, `resist_life_s
   Crossfire code gives the first in `collect.pl`'s order: the sorted path.)
 - A key needs a blank after it and at least one more character (`name ` with one blank is no line of the loader); the value starts at the
   first **space**, not at a tab (`hp<TAB>5` reads 0); trailing spaces are cut, trailing tabs are not.
+- Inside a message an empty line is dropped and a line of blanks is kept (`msg`, `A`, an empty line, two blanks, `B`, `endmsg` gives
+  "A\n  \nB\n"): the rule `<*>(^{WS}$)|\n` meant to ignore empty lines has `^` and `$` inside parentheses, where flex reads them as
+  plain characters, so it ignores only a newline (and a line "^ $"). Checked with flex on the rules of `loader.l`.
 - `end`, `More`, `msg` and `endmsg` must stand alone on their line and the line must end with a newline: an `end` that is the last
   bytes of a file, without a newline, is not an end.
 - A block without its `end` runs on into the next `Object` line, which renames it (Graal Kingdoms: `thug1` in `Monster/Human/thugs.arc`

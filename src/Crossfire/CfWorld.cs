@@ -40,6 +40,13 @@ public class CrossfireHost
     private readonly Dictionary<string, TreasureList> treasureLists = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Not in C: a key the host's own loader reads, as Graal Kingdoms' server added rules for <c>graalnpctype</c> and others to
+    /// <c>loader.l</c>. A line with such a key is kept in <see cref="CfObject.Extra"/> without the error C logs for a line it has no
+    /// rule for. This default knows none (docs/differences.md).
+    /// </summary>
+    public virtual bool IsLoaderKey(string key) => false;
+
+    /// <summary>
     /// treasure.c: the treasure lists are loaded (<c>first_treasurelist</c> is not NULL). The loader leaves randomitems empty
     /// until then, and the second pass of the archetypes sets it.
     /// </summary>

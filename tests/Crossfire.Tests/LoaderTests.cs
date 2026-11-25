@@ -355,7 +355,7 @@ public class LoaderTests
         CfWorld w = T.WorldWith("Object sign\nmsg\nHello\n  world\n\nendmsg\nhp 3\nend\nObject b\nmsg  \nx\nendmsg  \nend\n", out _);
 
         // Assert
-        Assert.Equal("Hello\n  world\n\n", Clone(w, "sign").Msg);
+        Assert.Equal("Hello\n  world\n", Clone(w, "sign").Msg);
         Assert.Equal(3, Clone(w, "sign").Stats.Hp);
         Assert.Equal("x\n", Clone(w, "b").Msg);
     }
@@ -833,6 +833,132 @@ public class LoaderTests
         Assert.Equal(3, w.UnknownKeys["flag"]);
         Assert.Equal(1, w.UnknownKeys["graalnpcparam"]);
         Assert.False(w.UnknownKeys.ContainsKey("#"));
+    }
+
+    [Fact]
+    public void LoadObject_Given_empty_lines_and_lines_of_blanks_in_a_message_When_read_Then_only_the_empty_lines_are_dropped()
+    {
+        // Arrange / Act (flex: <MESSAGE>.* takes a line of blanks; an empty line goes to the newline rule)
+        CfObject op = Load(T.World(out _), "msg\nA\n\n  \n\t\n\nB\nendmsg\nend\n");
+
+        // Assert
+        Assert.Equal("A\n  \n\t\nB\n", op.Msg);
+    }
+
+    [Fact]
+    public void LoadObject_Given_a_line_without_a_rule_When_read_Then_c_logs_unrecognized_string_and_the_end_of_the_text_returns_the_error()
+    {
+        // Arrange
+        CfWorld w = T.World(out List<string> log);
+        CfObject op = w.GetObject();
+
+        // Act: no end, so the scanner meets the end of the text with lex_error set
+        int ret = w.LoadObject(new LoadSource("hp 3\nhpbuff 5\n"), op, Define.LO_NEWFILE, 0);
+
+        // Assert
+        Assert.Equal(-1, ret);
+        Assert.Equal(new[] { "Error: Unrecognized string: hpbuff 5\n" }, log);
+        Assert.Equal(3, op.Stats.Hp);
+        Assert.Equal("5", op.Extra!.Get("hpbuff"));
+    }
+
+    [Fact]
+    public void LoadObject_Given_a_line_without_a_rule_and_then_end_When_read_Then_the_block_is_normal_and_the_next_call_starts_without_the_error()
+    {
+        // Arrange
+        CfWorld w = T.World(out List<string> log);
+        var src = new LoadSource("hpbuff 5\nend\nhp 2\n");
+
+        // Act
+        int first = w.LoadObject(src, w.GetObject(), Define.LO_NEWFILE, 0);
+        int second = w.LoadObject(src, w.GetObject(), Define.LO_REPEAT, 0);
+
+        // Assert
+        Assert.Equal(Define.LL_NORMAL, first);
+        Assert.Equal(Define.LL_EOF, second);
+        Assert.Single(log);
+    }
+
+    [Fact]
+    public void LoadObject_Given_blank_comment_and_literal_lines_outside_a_message_When_read_Then_they_follow_the_last_rules_of_loader_l()
+    {
+        // Arrange
+        CfWorld w = T.World(out List<string> log);
+        CfObject op = w.GetObject();
+
+        // Act: empty line and "#..." (ignored), "^ $" (the ignore rule's literal text), blanks, an indented comment, a key without a value
+        int ret = w.LoadObject(new LoadSource("\n# a comment\n^ $\n^$\n  \n  # indented\n  hp 3\nname\n"), op, Define.LO_NEWFILE, 0);
+
+        // Assert
+        Assert.Equal(-1, ret);
+        Assert.Equal(new[] { "Error: Unrecognized string:   \n", "Error: Unrecognized string:   # indented\n", "Error: Unrecognized string:   hp 3\n", "Error: Unrecognized string: name\n" }, log);
+        Assert.Equal(new[] { "name" }, op.Extra!.Entries.Select(e => e.Key).ToArray());
+        Assert.Equal(0, op.Stats.Hp);
+    }
+
+    [Fact]
+    public void LoadObject_Given_a_comment_at_the_end_of_the_text_without_a_newline_When_read_Then_it_is_unrecognized()
+    {
+        // Arrange (#.*\n needs the newline; .* takes the line)
+        CfWorld w = T.World(out List<string> log);
+
+        // Act
+        int ret = w.LoadObject(new LoadSource("hp 1\n#last"), w.GetObject(), Define.LO_NEWFILE, 0);
+
+        // Assert
+        Assert.Equal(-1, ret);
+        Assert.Equal(new[] { "Error: Unrecognized string: #last\n" }, log);
+    }
+
+    [Fact]
+    public void LoadObject_Given_a_key_the_host_reads_When_read_Then_it_is_kept_without_an_error()
+    {
+        // Arrange
+        CfWorld w = T.World(out List<string> log, new KeyHost("hpbuff"));
+        CfObject op = w.GetObject();
+
+        // Act
+        int ret = w.LoadObject(new LoadSource("hpbuff 5\nspbuff 2\n"), op, Define.LO_NEWFILE, 0);
+
+        // Assert
+        Assert.Equal(-1, ret);
+        Assert.Equal(new[] { "Error: Unrecognized string: spbuff 2\n" }, log);
+        Assert.Equal("5", op.Extra!.Get("hpbuff"));
+        Assert.Equal("2", op.Extra!.Get("spbuff"));
+    }
+
+    [Fact]
+    public void LoadObject_Given_only_keys_the_host_reads_When_the_text_ends_Then_it_returns_eof()
+    {
+        // Arrange
+        CfWorld w = T.World(out List<string> log, new KeyHost("hpbuff"));
+
+        // Act
+        int ret = w.LoadObject(new LoadSource("hpbuff 5\n"), w.GetObject(), Define.LO_NEWFILE, 0);
+
+        // Assert
+        Assert.Equal(Define.LL_EOF, ret);
+        Assert.Empty(log);
+    }
+
+    [Fact]
+    public void SetVariable_Given_a_line_without_a_rule_When_set_Then_it_logs_and_returns_the_error()
+    {
+        // Arrange
+        CfWorld w = T.World(out List<string> log);
+        CfObject op = w.GetObject();
+
+        // Act
+        int ret = w.SetVariable(op, "nosuchkey 1\n");
+
+        // Assert
+        Assert.Equal(-1, ret);
+        Assert.Equal(new[] { "Error: Unrecognized string: nosuchkey 1\n" }, log);
+    }
+
+    private sealed class KeyHost(string key) : CrossfireHost
+    {
+        public override bool IsLoaderKey(string k) => string.Equals(k, key, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

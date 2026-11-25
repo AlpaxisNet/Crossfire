@@ -52,6 +52,9 @@ public sealed partial class CfWorld
     private bool lexInMessage;
     private readonly StringBuilder msgbuf = new();
 
+    // loader.l lex_error: -1 after a line the scanner has no rule for; set to 0 when lex_load starts, returned at the end of the text.
+    private int lexError;
+
     /// <summary>
     /// Not in C: how many lines of each unknown key (lower case) the loader met, the lines it keeps on the object in
     /// <see cref="CfObject.Extra"/>. Comments (a # first) and blank lines are not counted.
@@ -235,12 +238,14 @@ public sealed partial class CfWorld
     private int LexLoad(CfObject op, int mapFlags, LoadSource sc)
     {
         bool ismore = false;
+        lexError = 0;
 
         while (true)
         {
             if (sc.Pos >= sc.Text.Length)
             {
-                return Define.LL_EOF;
+                // <<EOF>>: if we got an error, return the error; otherwise, return that we got EOF.
+                return lexError != 0 ? lexError : Define.LL_EOF;
             }
             int nl = sc.Text.IndexOf('\n', sc.Pos);
             bool hasNewline = nl >= 0;
@@ -260,6 +265,11 @@ public sealed partial class CfWorld
                         string shown = op.Msg.Length > 80 ? op.Msg.Substring(0, 80) : op.Msg;
                         Log(LogLevel.Debug, "\n\tWarning message length > " + Define.HUGE_BUF / 2 + " (max allowed=" + Define.HUGE_BUF + "): " + op.Msg.Length + "\n>" + shown + "<\n");
                     }
+                }
+                else if (hasNewline && line.Length == 0)
+                {
+                    // An empty line: <MESSAGE>.* matches nothing there and the rule for a newline wins, so it is not part of the
+                    // text. A line of blanks is (.* matches it; the ^{WS}$ of the ignore rule is literal text inside its parentheses).
                 }
                 else
                 {
@@ -324,10 +334,42 @@ public sealed partial class CfWorld
                 continue;
             }
 
-            // No rule: flex echoes the line to stdout and goes on. The port keeps it.
+            NoRule(op, line, hasNewline);
+        }
+    }
+
+    /// <summary>
+    /// The last rules of loader.l, for a line no rule above matched: <c>&lt;*&gt;(^{WS}$)|\n</c> ignores an empty line (inside the
+    /// parentheses flex reads <c>^</c> and <c>$</c> as plain characters, so the first half matches the text "^", blanks, "$"),
+    /// <c>#.*\n</c> a comment, and <c>.*</c> logs <c>yyerror("Unrecognized string")</c> and sets <c>lex_error</c> for any other line,
+    /// a line of blanks included. Not in C: a line with a key the host reads (<see cref="CrossfireHost.IsLoaderKey"/>) is no error,
+    /// and every unrecognized line that starts with a key is kept on the object (docs/differences.md).
+    /// </summary>
+    private void NoRule(CfObject op, string line, bool hasNewline)
+    {
+        if (line.Length == 0 || (hasNewline && line[0] == '#') || IsLiteralCaretBlanksDollar(line))
+        {
+            return;
+        }
+        int e = 0;
+        while (e < line.Length && !IsBlank(line[e]))
+        {
+            e++;
+        }
+        if (e == 0 || !Host.IsLoaderKey(line.Substring(0, e)))
+        {
+            // yyerror: LOG(llevError, "%s: %s\n", s, yytext)
+            Log(LogLevel.Error, "Unrecognized string: " + line + "\n");
+            lexError = -1;
+        }
+        if (e > 0)
+        {
             RecordUnknown(op, line);
         }
     }
+
+    private static bool IsLiteralCaretBlanksDollar(string line) =>
+        line.Length >= 2 && line[0] == '^' && line[^1] == '$' && IsBlankRest(line.Substring(0, line.Length - 1), 1);
 
     private static bool IsBlankRest(string line, int from)
     {

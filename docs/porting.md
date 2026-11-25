@@ -107,7 +107,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 
 | C function | C# member | Status |
 | --- | --- | --- |
-| the scanner and its rules section (`lex_load`) | `CfWorld.LexLoad` (private) with `ApplyKeyRule` | ported, rule by rule, in the order of the C file: `Object`, `name`, `name_pl`, `race`, `slaying`, `Inventory`, `arch` (the archetype of an object, or an object of the inventory), `other_arch`, `animation`, `More`, `end`, `msg`/`endmsg`, `title`, every number, flag and `resist_*` key, the old `immune`/`protected`/`vulnerable`, the ignored `can_*` keys, the plugin events |
+| the scanner and its rules section (`lex_load`) | `CfWorld.LexLoad` (private) with `ApplyKeyRule` | ported, rule by rule, in the order of the C file: `Object`, `name`, `name_pl`, `race`, `slaying`, `Inventory`, `arch` (the archetype of an object, or an object of the inventory), `other_arch`, `animation`, `More`, `end`, `msg`/`endmsg`, `title`, every number, flag and `resist_*` key, the old `immune`/`protected`/`vulnerable`, the ignored `can_*` keys, the plugin events, and the last rules (`CfWorld.NoRule`: empty lines and comments ignored, `.*` logs `Unrecognized string` and sets `lex_error`, which `<<EOF>>` returns) |
 | `yval` | `CfWorld.Yval` | ported |
 | `yyerror` | none | not ported: flex's error hook |
 | `load_object` | `CfWorld.LoadObject` | ported (`LO_REPEAT`, `LO_LINEMODE`, `LO_NEWFILE`, `LO_NOREAD`; the `FILE *` is a `LoadSource`) |

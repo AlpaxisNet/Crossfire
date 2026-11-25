@@ -25,8 +25,9 @@ The design, the decisions behind it and the phases are in the Alpaxis Suite's `s
   `common/object.c`, `common/arch.c`, `common/loader.l` (`CfWorld`), the `.arc` reader and saver, the animation and face tables, and
   `ArchCollector` (what `lib/collect.pl` does to the archetype folder). Maps, players and their client, treasures and items are not
   ported: the code calls a `CrossfireHost` where C calls them.
-- `tests/Crossfire.Tests`: xunit tests; one of them reads Graal Kingdoms' own archetypes when that folder is on the machine
-  (it is not part of this repository) and reports how many `Object` blocks, unknown keys and errors it finds.
+- `tests/Crossfire.Tests`: xunit tests; two of them read Graal Kingdoms' own archetypes when the environment variable
+  `CROSSFIRE_GK_ARCH` names their folder (the `Arch` folder of its world, not part of this repository) and report how many
+  `Object` blocks, unknown keys and errors they find.
 - [docs/porting.md](docs/porting.md): the table of every C function and what became of it. [docs/differences.md](docs/differences.md):
   every deliberate difference with its reason.
 

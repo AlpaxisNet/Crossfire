@@ -2,18 +2,37 @@ using Xunit.Abstractions;
 
 namespace Crossfire.Tests;
 
-/// <summary>Runs only when the archetypes of Graal Kingdoms are on this machine (they are not part of the repository).</summary>
+/// <summary>
+/// Runs only when the environment variable <c>CROSSFIRE_GK_ARCH</c> names a folder with the archetypes of Graal Kingdoms (its world's
+/// <c>Arch</c> folder; they are not part of the repository).
+/// </summary>
 public sealed class GkFactAttribute : FactAttribute
 {
-    public const string ArchFolder = "/home/v/Desktop/UGD/Playerworlds/Graal Kingdoms/Gk Dev [2018-06-28]/GK Dev/Arch";
+    public const string Variable = "CROSSFIRE_GK_ARCH";
+
+    public static string ArchFolder => Environment.GetEnvironmentVariable(Variable) ?? "";
 
     public GkFactAttribute()
     {
-        if (!Directory.Exists(ArchFolder))
+        if (ArchFolder.Length == 0 || !Directory.Exists(ArchFolder))
         {
-            Skip = "The archetypes of Graal Kingdoms are not on this machine: " + ArchFolder;
+            Skip = "Set " + Variable + " to the Arch folder of Graal Kingdoms' world to run this test.";
         }
     }
+}
+
+/// <summary>
+/// Not ported from a Crossfire file: the keys of Graal Kingdoms' archetypes that are not Crossfire's and are its own fields (its server
+/// added rules for them to the loader); its other unknown lines are misspellings and broken messages, errors there too.
+/// </summary>
+internal sealed class GkLoaderHost : CrossfireHost
+{
+    private static readonly HashSet<string> Keys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "graalnpctype", "graalnpcparam", "flag", "hpbuff", "spbuff", "gracebuff", "castingtime", "restrictaccess", "nopeaceful",
+    };
+
+    public override bool IsLoaderKey(string key) => Keys.Contains(key);
 }
 
 /// <summary>Not ported from a Crossfire file: the measure of the .arc reader on Graal Kingdoms' own archetypes.</summary>
@@ -40,7 +59,7 @@ public class GkTests
             }
         }
         var log = new List<string>();
-        var w = new CfWorld(null, (level, text) => log.Add(level + ": " + text));
+        var w = new CfWorld(new GkLoaderHost(), (level, text) => log.Add(level + ": " + text));
 
         // Act
         ArchCollection collection = ArchCollector.Collect(GkFactAttribute.ArchFolder);
@@ -120,7 +139,10 @@ public class GkTests
         Assert.Equal(1325, keys["graalnpctype"]);
         Assert.Equal(700, keys["graalnpcparam"]);
         Assert.Equal(218, keys["flag"]);
-        Assert.Equal(95, errors);
+        // 95 errors of the data (45 animations the backup lacks, 48 "randomitems none", an editable on a nested block, a generator
+        // without other_arch) and 26 unrecognized lines that are not Graal Kingdoms' own keys: misspellings (weght, 4Dex,
+        // resist_blindness...) and the text of the three messages that start "msg <edit msg>".
+        Assert.Equal(121, errors);
     }
 
     private static void AddKeys(CfObject o, SortedDictionary<string, int> keys, ref int withExtra)
