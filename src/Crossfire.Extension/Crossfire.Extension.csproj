@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Crossfire.Extension</RootNamespace>
+    <AssemblyName>Crossfire.Extension</AssemblyName>
+    <Description>The Crossfire extension: the MUD engine that a game server starts and talks to with docs/protocol.md.</Description>
+    <PackageLicenseExpression>GPL-2.0-or-later</PackageLicenseExpression>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Crossfire\Crossfire.csproj" />
+    <InternalsVisibleTo Include="Crossfire.Extension.Tests" />
+  </ItemGroup>
+
+  <!-- the output folder is an extension folder (docs/protocol.md section 1): the executable and extension.json side by side -->
+  <ItemGroup>
+    <None Include="extension.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
