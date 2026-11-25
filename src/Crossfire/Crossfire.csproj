@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Crossfire</RootNamespace>
+    <AssemblyName>Crossfire</AssemblyName>
+    <Description>Crossfire's object model and archetypes, ported to C# for the Alpaxis GameServer.</Description>
+    <PackageLicenseExpression>GPL-2.0-or-later</PackageLicenseExpression>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Crossfire.Tests" />
+  </ItemGroup>
+
+</Project>

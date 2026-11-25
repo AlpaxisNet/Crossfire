@@ -18,3 +18,20 @@ artifacts, recipes, attack messages), and documentation. Nothing of Graal Kingdo
 world's folder), and nothing of the Alpaxis network (no addresses, accounts, keys or tokens).
 
 The design, the decisions behind it and the phases are in the Alpaxis Suite's `server/docs/gk-mudlib.md`.
+
+## What is here
+
+- `src/Crossfire`: the object model (`CfObject`, `Living`, `Archetype`, `Define`), the world of globals and functions of
+  `common/object.c`, `common/arch.c`, `common/loader.l` (`CfWorld`), the `.arc` reader and saver, the animation and face tables, and
+  `ArchCollector` (what `lib/collect.pl` does to the archetype folder). Maps, players and their client, treasures and items are not
+  ported: the code calls a `CrossfireHost` where C calls them.
+- `tests/Crossfire.Tests`: xunit tests; one of them reads Graal Kingdoms' own archetypes when that folder is on the machine
+  (it is not part of this repository) and reports how many `Object` blocks, unknown keys and errors it finds.
+- [docs/porting.md](docs/porting.md): the table of every C function and what became of it. [docs/differences.md](docs/differences.md):
+  every deliberate difference with its reason.
+
+```bash
+# on the Alpaxis development machine: inside the suite's client/scripts/capped.sh (AGENTS.md)
+capped.sh -l -m 6G -t 25m dotnet build Crossfire.sln -c Release
+capped.sh -l -m 6G -t 25m dotnet test Crossfire.sln -c Release --no-build
+```
