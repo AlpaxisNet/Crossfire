@@ -147,10 +147,20 @@ internal sealed partial class Dispatcher
     /// <summary>Writes the account's file (through the writer).</summary>
     private void SubmitAccount(PlayerState player)
     {
+        (string, byte[])? file = AccountFile(player);
+        if (file != null)
+        {
+            PutFile(file.Value.Item1, file.Value.Item2);
+        }
+    }
+
+    /// <summary>The file of an account (its path under the data folder and its content), and its dirty flag cleared; null when it has no usable file name.</summary>
+    private (string, byte[])? AccountFile(PlayerState player)
+    {
         string? rel = FileNames.AccountFile(player.Account);
         if (rel == null)
         {
-            return;
+            return null;
         }
         var sb = new StringBuilder();
         world!.SaveObject(sb, player.Ob, 3);
@@ -160,8 +170,8 @@ internal sealed partial class Dispatcher
         {
             text = text.Insert(nl + 1, "account " + FileText.EscapeLine(FileText.ToBytesText(player.Account)) + "\n");
         }
-        PutFile(rel, FileText.ToBytes(text));
         player.Dirty = false;
+        return (rel, FileText.ToBytes(text));
     }
 
     /// <summary>Sets one of the player's client strings (the whole flag name) when its value is not what the client has.</summary>

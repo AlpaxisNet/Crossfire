@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Crossfire\Crossfire.csproj" />
     <InternalsVisibleTo Include="Crossfire.Extension.Tests" />
+    <InternalsVisibleTo Include="Crossfire.WriterChild" />
   </ItemGroup>
 
   <!-- the output folder is an extension folder (docs/protocol.md section 1): the executable and extension.json side by side -->

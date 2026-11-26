@@ -39,7 +39,7 @@ The design, the decisions behind it and the phases are in the Alpaxis Suite's `s
   (`player.login`, `player.logout`, the account files); the Graal Kingdoms adaptation (classes, image, properties) is in its `Gk`
   folder. What it does and the tables of its members: [docs/extension.md](docs/extension.md). Its lifecycle (the flock on `<data_dir>/.lock`, the file writer
   and the state file, flush, shutdown and the save at the exit, ticks, the counters of `stats`, the paging helpers) is described there too.
-  Tests: `tests/Crossfire.Extension.Tests`.
+  Tests: `tests/Crossfire.Extension.Tests` (with `tests/Crossfire.WriterChild`, the child process of the write-order fault tests).
 - `tests/Crossfire.Tests`: xunit tests; two of them read Graal Kingdoms' own archetypes when the environment variable
   `CROSSFIRE_GK_ARCH` names their folder (the `Arch` folder of its world, not part of this repository) and report how many
   `Object` blocks, unknown keys and errors they find. The extension's tests also read the world's `mudlevels` and `scripts` folders when
