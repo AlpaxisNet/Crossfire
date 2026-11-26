@@ -129,10 +129,19 @@ Graal Kingdoms' `mudlevels` files are Crossfire's map format with these differen
   message. The port has no pictures: `FaceTable.AutoRegister` (the default) gives a name a number the first time it is seen, so no face name
   of an archetype is lost; with it off `FindFace` returns its `error` argument as C does. Number 0 is `bug.111`, 1 `blank.111` (the face of a
   cleared object), 2 `empty.111`.
-- **Treasure lists.** The lists belong to `common/treasure.c` (the treasure phase). Until then `CrossfireHost.FindTreasureList` makes a
-  `TreasureList` for any name, so that the `randomitems` of an archetype keeps its name; the cases of C stay: `randomitems none` is no list
-  (and the second pass logs "Failed to link treasure to arch", 48 times in Graal Kingdoms' folder) and nothing is set while the first pass
-  runs. A host that knows the lists returns null for the others and gets C's "Couldn't find treasurelist" message.
+- **Treasure lists.** `CfWorld.TreasureText` (the text of the treasures file; the extension supplies it) is read by `load_treasures`
+  between the two archetype passes; the lists then answer `find_treasurelist` and a name that is not one gets C's "Couldn't find
+  treasurelist" message. Without a text `CrossfireHost.FindTreasureList` makes a `TreasureList` for any name, so that the `randomitems` of
+  an archetype keeps its name; the cases of C stay: `randomitems none` is no list (and the second pass logs "Failed to link treasure to
+  arch", 48 times in Graal Kingdoms' folder) and nothing is set while the first pass runs.
+- **`fix_generated_item` is partly ported.** Of the function only the `GT_STARTEQUIP` branch and `fix_flesh_item` are: random magic
+  (`set_magic`, so the `magic` of a list element is not used for a bonus), the artifacts (`generate_artifact` and the 1 in 20 roll for one,
+  which also takes a `RANDOM()` that is not taken here) and what the type switch gives rings, amulets, wands, rods, scrolls, books,
+  spellbooks, potions, runes, bracers and cursed weapons or armour are not (phase 4: they need the spell table, `readable.c` and
+  `artifact.c`). An item of those types comes out as its archetype is. The starting items of the six class lists are not touched by it
+  except the amulet and the books of the priest and the casters, which are as the archetypes have them.
+- **A treasure element without archetype or list**, or a list that does not exist, makes nothing: C reads the null pointer
+  (`t->item->clone`, `t->total_chance`) and crashes after logging the error.
 - **`ArchCollector`** is collect.pl's archetype half in C#: the archetype folder to the text of the two files. `anim ... mina` blocks become
   an `animation` line and an entry of the animations file; the colour lines (`color_fg`, `color_bg`, `visibility`, `magicmap`) are removed.
 - **`CrossfireHost`** (the host) and the marker interfaces `IPlayerHandle`, `IMapHandle`, `ISpellHandle`: see [porting.md](porting.md).

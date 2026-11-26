@@ -95,7 +95,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | `first_arch_pass` | `CfWorld.FirstArchPass` | ported |
 | `second_arch_pass` | `CfWorld.SecondArchPass` | ported (including `fgets` with a buffer of `MAX_BUF`) |
 | `check_generators` | `CfWorld.CheckGenerators` | ported |
-| `load_archetypes` | `CfWorld.LoadArchetypes(text)` | ported; the text takes the place of the file, `load_treasures` is `CrossfireHost.LoadTreasures` |
+| `load_archetypes` | `CfWorld.LoadArchetypes(text)` | ported; the text takes the place of the file; between the passes `CrossfireHost.LoadTreasures` is called and then, when `CfWorld.TreasureText` is set, `load_treasures` reads it (`CfWorld.LoadTreasureLists`) |
 | `arch_to_object`, `create_singularity`, `get_archetype` | `CfWorld.ArchToObject`, `CreateSingularity`, `GetArchetype` | ported |
 | `hasharch`, `find_archetype`, `add_arch` | `CfWorld.Hasharch`, `FindArchetype`, `AddArch` | ported (5003 slots, linear probing, `ARCHTABLE_TOO_SMALL` is a `CrossfireFatalException`) |
 | `type_to_archetype`, `clone_arch` | `CfWorld.TypeToArchetype`, `CloneArch` | ported |
@@ -144,8 +144,21 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | lib/collect.pl.in | the traversal, the colour lines, the `anim` blocks | `ArchCollector.Collect` | ported as far as it changes the text of the `archetypes` and `animations` files; the pictures, `bmaps`, `faces` are not |
 | common/button.c | `add_button_link`, `get_button_value` | `CrossfireHost.AddButtonLink`, `GetButtonValue` | not ported: connections of a map |
 | common/living.c | `fix_player` | `CrossfireHost.FixPlayer` | not ported: the player's stats are the next phase |
-| common/treasure.c | `load_treasures`, the treasure lists | `CrossfireHost.LoadTreasures`, `FindTreasureList` | not ported here (the treasure phase); the default host knows every name |
+| common/treasure.c | `load_treasures`, the treasure lists | see "common/treasure.c" below | the lists are read from `CfWorld.TreasureText` when it is set; without it the default host knows every name |
 | include/player.h, include/map.h | `struct pl`, `mapdef` | `IPlayerHandle`, `IMapHandle` | not ported: markers that the owner implements |
+
+### common/treasure.c, include/treasure.h (the treasure lists, the subset phase 3 needs)
+
+| C function | C# member | Status |
+| --- | --- | --- |
+| `treasure`, `treasurelist`, `GT_*` | `Treasure`, `TreasureList`, `GT` | ported |
+| `load_treasure` (static), `check_treasurelist` (static), `load_treasures` | `CfWorld.LoadTreasure` (private), `CheckTreasurelist` (private), `LoadTreasureLists(text)` | ported (the text takes the place of the file; `treasure`, `treasureone`, `arch`, `list`, `change_name`, `change_title`, `change_slaying`, `chance`, `nrof`, `magic`, `yes`, `no`, `more`, `end`; `sscanf`'s true-on-EOF and the stale word of `variable` are kept) |
+| `find_treasurelist` | `CfWorld.FindTreasurelist` | ported (the lists read from the text answer; the first of a name is the one found) |
+| `put_treasure` (static), `change_treasure` (static) | `CfWorld.PutTreasure` (private), `ChangeTreasure` (private) | ported; `monster_check_apply_func` is `CrossfireHost.MonsterCheckApply` |
+| `create_all_treasures`, `create_one_treasure`, `create_treasure` | `CfWorld.CreateAllTreasures`, `CreateOneTreasure`, `CreateTreasure` | ported (a list or archetype that does not exist, which C reads through a null pointer, makes nothing; `abort()` is a `CrossfireFatalException`) |
+| `fix_generated_item` | `CfWorld.FixGeneratedItem` | ported for the `GT_STARTEQUIP` branch and `fix_flesh_item` only (docs/differences.md "Treasure lists") |
+| `fix_flesh_item` | `CfWorld.FixFleshItem` | ported |
+| `init_archetype_pointers`, `generate_treasure`, `magic_from_difficulty`, `set_abs_magic`, `set_magic`, `set_ring_bonus`, the artifacts (`load_artifacts`, `generate_artifact`, ...), `dump_*`, `free_*` | none | not ported: random magic and artifacts (phase 4), debugging dumps |
 
 ### common/item.c (names and descriptions of items)
 

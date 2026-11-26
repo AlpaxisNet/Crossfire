@@ -166,6 +166,11 @@ public class CrossfireHost
     /// </summary>
     public virtual IEnumerable<string> TreasureAbilityNames(TreasureList list) => Array.Empty<string>();
 
+    /// <summary>The <c>monster_check_apply_func</c> pointer of common/glue.c (treasure.c <c>put_treasure</c> with GT_APPLY): a monster applies the item it was given. Default: nothing.</summary>
+    public virtual void MonsterCheckApply(CfObject monster, CfObject item)
+    {
+    }
+
     /// <summary>arch.c <c>find_best_weapon_used_match</c> (needs item.c's name matching, not ported).</summary>
     public virtual CfObject? FindBestWeaponUsedMatch(CfObject player, string parameters) => null;
 }

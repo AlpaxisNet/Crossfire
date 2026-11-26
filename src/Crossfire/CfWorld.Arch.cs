@@ -374,6 +374,7 @@ public sealed partial class CfWorld
 
         Log(LogLevel.Debug, " loading treasure...\n");
         Host.LoadTreasures();
+        ReadTreasuresText();
         Log(LogLevel.Debug, " done\n arch-pass 2...\n");
         SecondArchPass(archetypesText);
         Log(LogLevel.Debug, " done\n");
@@ -567,7 +568,8 @@ public sealed partial class CfWorld
         {
             return null;
         }
-        TreasureList? tl = Host.FindTreasureList(name);
+        // the lists of the treasures text answer for themselves (the first of a name, as C's walk of the chain finds it)
+        TreasureList? tl = treasureLists != null ? (treasureLists.TryGetValue(name, out TreasureList? read) ? read : null) : Host.FindTreasureList(name);
         if (tl == null)
         {
             Log(LogLevel.Error, "Couldn't find treasurelist " + name + "\n");
