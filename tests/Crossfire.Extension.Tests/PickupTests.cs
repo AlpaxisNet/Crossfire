@@ -562,6 +562,23 @@ public sealed class PickupTests
     }
 
     [Fact]
+    public void PickUp_Given_a_sword_of_nrof_1_as_Graal_Kingdoms_archetypes_have_When_dropped_and_picked_up_Then_the_text_is_the_singular_name_as_query_short_name_gives()
+    {
+        // Arrange: C's query_short_name names an object by its plural unless nrof is 1 (it names one that has no nrof, no weight, no title and no
+        // magic by the singular; a sword has a weight). 203 of the 205 weapon archetypes of the world have "nrof 1": the text of a pick up is singular.
+        using var g = new Game(inventory: "arch sword\nnrof 1\nend\n");
+        ulong sword = g.Items(g.Player).Single(i => i.Name == "sword").Handle;
+        Assert.True(Result(g.Drop(sword, 2, 2, 0)));
+
+        // Act
+        ReplyFrame r = g.Pick(sword, 1);
+
+        // Assert
+        Assert.True(Result(r));
+        Assert.Equal(new[] { "You pick up the sword." }, Lines(r));
+    }
+
+    [Fact]
     public void PickUp_Given_an_item_already_in_the_pack_or_in_another_players_tree_When_picked_up_Then_false()
     {
         // Arrange
