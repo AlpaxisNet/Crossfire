@@ -600,7 +600,7 @@ public sealed class SkeletonTests
         // Assert
         Assert.True(functions.Single(f => f.Get("name")!.AsString == "t4c0slow").Get("slow")!.AsBool);
         Assert.False(functions.Single(f => f.Get("name")!.AsString == "t4c0fast").Get("slow")!.AsBool);
-        Assert.Equal(1, functions.Count(f => f.Get("slow")!.AsBool));
+        Assert.Equal(1, functions.Count(f => f.Get("slow")!.AsBool && f.Get("name")!.AsString.StartsWith("t4c", StringComparison.Ordinal))); // the lanes of wave 5 register slow functions of their own
     }
 
     [Fact]
