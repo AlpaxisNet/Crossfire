@@ -1242,6 +1242,24 @@ public sealed class InventoryTests : IDisposable
         Assert.Equal(3, Get(ext, places[0].Get("handle")!.AsHandle, Obj("mudquantity")).AsInt);
     }
 
+    [Fact]
+    public void MudOrderInventory_Given_the_id_of_an_item_in_a_sack_When_ordered_Then_it_is_not_moved_out_of_the_sack()
+    {
+        // Arrange
+        using DirectExt ext = Start();
+        Login(ext, "bob");
+        CfObject bag = First(Pl(ext, "bob"), "bag")!;
+        CfObject inBag = bag.Inv!;
+        string before = Snapshot(Pl(ext, "bob"));
+
+        // Act
+        Fn(ext, Manifest.OpMudOrderInventory, "bob", Val.List(Val.Int(Tag(ext, inBag))));
+
+        // Assert
+        Assert.Same(bag, inBag.Env);
+        Assert.Equal(before, Snapshot(Pl(ext, "bob")));
+    }
+
     // ------------------------------------------------------------------ the account is not loaded, bad shapes
 
     [Fact]

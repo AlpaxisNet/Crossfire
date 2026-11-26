@@ -1023,3 +1023,16 @@ and a call is `unknown_op`. An entry is `<name>,<icon>`: the name is `ItemString
 finds the item (a test pins that every weapon of a loaded account is listed under its field [0]); the icon is `mud_<face>.png`. Weapons are
 the visible objects of types 15, 14, 162 and 163; equipment the applied visible objects; skills the type-43 objects. `mudlistspells` writes
 `this.spellpaths` (the 20 names of `spellpathnames`) and no spell, as the port has no spell table.
+
+**Mutants tried against `InventoryTests.cs`** (each broken, a named test failed, restored): count 0 accepted, the weight test without
+`carrying`, `addinvobject2` testing the weight, no text when too heavy, a new object not identified, remove not all or nothing, a removed
+weapon staying current, a whole stack not freed, `removeinvobjectbyid` ignoring the stack size or not looking in sacks, an object without
+`nrof` counting 0, `countinvobject` always deep, the deep find without sacks, the title without "name title", a container that holds
+everything, the skill's own level instead of its experience object's, a case-sensitive skill name, bows not weapons, a comma left in
+field [0], no end marker, a relink without `Above`, a reset that loses the count or the applied state, an increase without weight, a
+level object that does not queue `onUpdateObject`, a method without `CheckBusy`, a function not `slow`, a miss of `mudfindinvobject`
+answering 0, lists on a 1.0 link, an order that takes items out of a sack (the test host crashes on the cyclic chain), a cut stack not
+through `decrease_ob_nr`, `removeinvobjects` stopping after one stack, a decrease to zero that keeps the object, `mudhaveskill` false,
+the spell paths one short, the equipment list not filtered. Not caught, and equivalent: leaving out `ps.Dirty = true` after an add (the
+object model's hooks mark the account dirty as well).
+
