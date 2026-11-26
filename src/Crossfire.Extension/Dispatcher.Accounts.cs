@@ -33,8 +33,10 @@ internal sealed partial class Dispatcher
         }
         players[account] = player;
         AttachController(player);
+        FixLoadedAccount(player, fromFile: !player.Dirty); // login.c check_login: the experience and fix_player of a file's player (a new one is Dirty)
         SendClientStrings(player);
         StartItems(player, again: false);
+        SendLoginHooks(player);
         events.Add(Val.Map(
             ("name", Val.Str(Manifest.EventOnLoadedMudAccount)),
             ("target", Val.Str("player")),

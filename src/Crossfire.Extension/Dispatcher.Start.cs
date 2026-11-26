@@ -88,7 +88,7 @@ internal sealed partial class Dispatcher
             case TMudPlayerMembers.MethodSaveMudAccount:
                 return args.Count == 0 ? SaveMudAccount(ps) : Outcome.Fail(Status.BadArgs, "savemudaccount takes no arguments");
             case TMudPlayerMembers.MethodBackupMudAccount:
-                return args.Count == 0 ? BackupMudAccount(ps) : Outcome.Fail(Status.BadArgs, "backupmudaccount takes no arguments");
+                return args.Count == 0 ? BackupMudAccount(ps, "") : Text1(args) is { } suffix ? BackupMudAccount(ps, suffix) : Outcome.Fail(Status.BadArgs, "backupmudaccount takes a name");
             case TMudPlayerMembers.MethodMudLoadAccount:
                 return Text1(args) is { } slot ? LoadMudAccount(ps, "_" + slot) : Outcome.Fail(Status.BadArgs, "Mud_LoadAccount takes a slot");
             default:
@@ -329,8 +329,11 @@ internal sealed partial class Dispatcher
             log(1, "loadmudaccount: " + (slot ? "there is no file " + key : "the file of account " + key + " cannot be read"));
             return Outcome.Ok(Val.False);
         }
+        bool fromFile = !fresh.Dirty; // a player made new (no file) is Dirty
         ReplacePlayerObject(ps, fresh.Ob, key, loaded: true);
+        FixLoadedAccount(ps, fromFile);
         SendClientStrings(ps);
+        SendLoginHooks(ps);
         events.Add(Val.Map(
             ("name", Val.Str(Manifest.EventOnLoadedMudAccount)),
             ("target", Val.Str("player")),
@@ -399,22 +402,33 @@ internal sealed partial class Dispatcher
     }
 
     /// <summary>
-    /// <c>backupmudaccount</c>: the account as it is now is written to <c>backups/&lt;file&gt;.&lt;UTC time&gt;.txt</c> of the data
-    /// folder (and the account's own file is brought up to date).
+    /// <c>backupmudaccount(name)</c>: the account as it is now is written to <c>backups/&lt;file&gt;&lt;name&gt;.&lt;UTC time&gt;.txt</c> of the
+    /// data folder (and the account's own file is brought up to date). The name is checked like an account's (docs/mud-phase3.md section
+    /// 4.7): it is escaped like the account's file name, so it cannot name a place outside the folder, it may not hold a control
+    /// character, and the whole file name must be one the account's files may have; otherwise the call fails and nothing is written.
     /// </summary>
-    private Outcome BackupMudAccount(PlayerState ps)
+    private Outcome BackupMudAccount(PlayerState ps, string name)
     {
+        if (HasControlCharacter(name))
+        {
+            return Outcome.Fail(Status.BadArgs, "the name holds a control character");
+        }
         if (!ps.Loaded)
         {
             return Outcome.Ok(Val.Nil);
         }
+        string key = ps.FileKey + FileText.ToBytesText(name);
         if (FileNames.AccountFile(ps.FileKey) == null)
         {
             return Outcome.Ok(Val.Nil);
         }
+        if (FileNames.AccountFile(key) == null)
+        {
+            return Outcome.Fail(Status.BadArgs, "the name is too long for a file name");
+        }
         SubmitAccount(ps);
         string stamp = options.Time.GetUtcNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        PutFile(FileNames.BackupFolder + "/" + FileNames.Escape(ps.FileKey) + "." + stamp + FileNames.AccountSuffix, AccountFileBytes(ps));
+        PutFile(FileNames.BackupFolder + "/" + FileNames.Escape(key) + "." + stamp + FileNames.AccountSuffix, AccountFileBytes(ps));
         writer!.Kick();
         return Outcome.Ok(Val.Nil);
     }
