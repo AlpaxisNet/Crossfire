@@ -17,7 +17,7 @@ internal sealed class ConsumableHost : CrossfireHost
 {
     public List<string> Lines { get; } = new();
 
-    public int Fixes { get; private set; }
+    public int Fixes { get; set; }
 
     public override void FixPlayer(CfObject player) => Fixes++;
 
@@ -57,6 +57,9 @@ public sealed class ConsumableTests
 
         public Queue<int> Dice { get; } = new();
 
+        /// <summary>How often the player's flush was asked for: the strings of the window follow in the same request.</summary>
+        public int Touches { get; set; }
+
         public Fixture(string arc = Arc)
         {
             World = new CfWorld(Host, (_, _) => { });
@@ -74,7 +77,7 @@ public sealed class ConsumableTests
             ob.Stats.Food = (short)food;
             ob.Stats.Hp = (short)hp;
             ob.Stats.Maxhp = (short)maxhp;
-            var contr = new Player(new PlayerState("bob", ob), _ => { });
+            var contr = new Player(new PlayerState("bob", ob), _ => Touches++);
             ob.Contr = contr;
             contr.OrigStats.CopyFrom(ob.Stats);
             contr.StoreStats();
@@ -159,6 +162,57 @@ public sealed class ConsumableTests
         // Assert
         Assert.Equal(new[] { "The meat tasted terrible!" }, f.Host.Lines);
         Assert.Equal(600, ob.Stats.Food);
+    }
+
+    [Fact]
+    public void ApplyFood_Given_a_player_that_eats_When_the_state_changed_Then_the_window_of_the_player_is_asked_for_in_the_same_request()
+    {
+        // Arrange
+        var f = new Fixture();
+        (CfObject ob, _) = f.Player();
+        CfObject apple = f.Give(ob, "apple");
+        int before = f.Touches;
+
+        // Act
+        Consumable.ApplyFood(f.World, ob, apple);
+
+        // Assert
+        Assert.True(f.Touches > before);
+    }
+
+    [Fact]
+    public void ApplyFood_Given_a_player_and_an_eaten_callback_When_he_eats_Then_it_is_told_the_archetype_the_food_and_the_curse_after_the_food_is_gone()
+    {
+        // Arrange
+        var f = new Fixture();
+        (CfObject ob, _) = f.Player();
+        CfObject apple = f.Give(ob, "apple", o => o.SetFlag(Define.FLAG_CURSED));
+        var told = new List<string>();
+
+        // Act
+        Consumable.ApplyFood(f.World, ob, apple, (who, arch, food, cursed) => told.Add(who.Name + " " + arch!.Name + " " + (food.Env == null) + " " + cursed));
+
+        // Assert
+        Assert.Equal(new[] { "bob apple True True" }, told);
+    }
+
+    [Fact]
+    public void ApplyFood_Given_a_monster_When_it_eats_Then_the_eaten_callback_is_not_told()
+    {
+        // Arrange
+        var f = new Fixture();
+        CfObject mon = f.Make("sword");
+        mon.Type = 0;
+        CfObject apple = f.Make("apple");
+        apple.Nrof = 1;
+        f.World.InsertObInOb(apple, mon);
+        int told = 0;
+
+        // Act
+        Consumable.ApplyFood(f.World, mon, apple, (_, _, _, _) => told++);
+
+        // Assert
+        Assert.Equal(0, told);
     }
 
     [Fact]
@@ -361,6 +415,7 @@ public sealed class ConsumableTests
         CfObject meat = Flesh(f, ob, 40, 50);
         f.Dice.Enqueue(7884);
         f.Dice.Enqueue(0);
+        f.Host.Fixes = 0; // giving the items fixed the player already
 
         // Act
         int ate = Consumable.DragonEatFlesh(f.World, ob, meat);
@@ -369,6 +424,7 @@ public sealed class ConsumableTests
         Assert.Equal(1, ate);
         Assert.Equal(1, skin.Resist[Define.ATNR_FIRE]);
         Assert.Equal(new[] { "Hmm! The meat tasted delicious!", "Your skin is now more resistant to fire!" }, f.Host.Lines);
+        Assert.Equal(1, f.Host.Fixes);
     }
 
     [Fact]
@@ -561,6 +617,7 @@ public sealed class ConsumableTests
         (CfObject ob, Player contr) = f.Player();
         CfObject potion = f.Give(ob, "potion_str");
         Assert.False(potion.QueryFlag(Define.FLAG_IDENTIFIED));
+        f.Host.Fixes = 0;
 
         // Act
         int r = Consumable.ApplyPotion(f.World, ob, potion);
@@ -571,6 +628,7 @@ public sealed class ConsumableTests
         Assert.Equal(15, ob.Stats.Str);
         Assert.StartsWith("15 ", ob.Extra!.Get(Player.OrigStatsKey));
         Assert.Equal(new[] { "You feel stronger." }, f.Host.Lines);
+        Assert.Equal(2, f.Host.Fixes); // the potion's own fix_player and the one of its removal from the pack
         Assert.False(Held(ob, potion));
         Assert.True(potion.QueryFlag(Define.FLAG_IDENTIFIED));
         Assert.False(potion.QueryFlag(Define.FLAG_APPLIED));
@@ -748,6 +806,7 @@ public sealed class ConsumableTests
         SetLevels(contr);
         CfObject potion = f.Give(ob, "potion_improve");
         potion.Attacktype = Define.AT_GODPOWER;
+        f.Host.Fixes = 0;
 
         // Act
         Consumable.ApplyPotion(f.World, ob, potion);
@@ -756,6 +815,7 @@ public sealed class ConsumableTests
         Assert.Equal(new[] { 9, 9 }, new[] { (int)contr.LevHp[1], (int)contr.LevHp[2] });
         Assert.StartsWith("9 9 8", ob.Extra!.Get(Player.LevHpKey));
         Assert.Equal(new[] { "The Gods smile upon you and remake you", "a little more in their image.", "You feel a little more perfect." }, f.Host.Lines);
+        Assert.Equal(2, f.Host.Fixes); // the fix of the new points and the one of the potion's removal
         Assert.False(Held(ob, potion));
     }
 
