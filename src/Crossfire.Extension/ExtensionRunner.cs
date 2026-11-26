@@ -120,6 +120,7 @@ internal static class ExtensionRunner
         var writer = new FrameWriter(stream, counters);
 
         HostHello host;
+        ManifestBuilder manifest;
         int maxFrame;
         try
         {
@@ -141,7 +142,9 @@ internal static class ExtensionRunner
             }
             host = HostHello.Parse(hello.Hello);
             maxFrame = (int)Math.Min(FrameCodec.InitialMaxFrame, host.MaxFrame);
-            writer.Send(new HelloFrame(Manifest.Hello(Manifest.Build(options.WantsTick))));
+            // the manifest is built after the host's HELLO has been read: the link's minor version decides which keys it has (section 4.1)
+            manifest = Manifest.Collect(host.LinkMinor, options.ExtraManifest);
+            writer.Send(new HelloFrame(Manifest.Hello(manifest.ToVal(options.WantsTick), Manifest.ProtoMinor)));
         }
         catch (ProtocolException e)
         {
@@ -154,7 +157,7 @@ internal static class ExtensionRunner
         var state = new LinkState();
         var queue = new BlockingCollection<Queued>();
         using var stopping = new CancellationTokenSource();
-        var dispatcher = new Dispatcher(host, maxFrame, Log, options, counters, stopping.Token);
+        var dispatcher = new Dispatcher(host, maxFrame, Log, options, counters, stopping.Token, manifest);
         var worker = new Thread(() => Work(queue, dispatcher, writer, state, counters, options)) { IsBackground = true, Name = "crossfire-worker" };
         worker.Start();
 

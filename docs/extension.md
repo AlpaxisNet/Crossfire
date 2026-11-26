@@ -22,6 +22,9 @@ The output folder of the build is an extension folder (protocol section 1): the 
   manifest ids) is `unknown_op`; a request before the REPLY to `session.init` is `unavailable`. A reply carries the effects
   (`npc.place`, `npc.remove`, `client.set`, `client.del`) and events (`onUpdateObject`, `onLoadedMudAccount`) of its operation, only
   when its status is 0. No query is sent yet (the extension asks the host nothing in this version).
+- **Version.** The extension sends `proto_minor` 1 and knows the link's minor version once it has read the host's HELLO
+  (`Dispatcher.LinkMinor`, below); its manifest is built after that and has no 1.1 key for a 1.0 host. Nothing 1.1 is declared by the
+  core: the lanes of phase 3 add what they need ("The skeleton of wave 4" at the end).
 - **Handles.** The epoch of the host's HELLO in the high 32 bits and one tag per archetype, level object and logged-in player in the
   low 32 bits, given out at the first need and never again for another object. A nil, other-epoch, tag-0, never-issued or dead handle
   is `bad_handle`. Releases are ignored: archetypes are permanent, objects in a level are never released, players log out. See
@@ -637,3 +640,102 @@ that is nil until the host passes the player object itself (a protocol gap, repo
 - `mudaddspecialobject` splits its fourth argument at the first white space; `value` is cut to an int.
 - An object's `mudrealname` is `ob->name`; `fullname` and `mudfullname` are `query_name` and `query_short_name` of the object (so they
   change with `nrof`, the state flags and `name`).
+
+## The skeleton of wave 4
+
+Wave 4 of phase 3 (mud-phase3.md section 8 of the suite) is written by lanes that each own files. This part is what they share. All
+of it is internal to the extension and tested in `SkeletonTests.cs`.
+
+### The link's minor version
+
+`HostHello.LinkMinor` is the smaller of the host's `proto_minor` and `Manifest.ProtoMinor` (1); it is read from the host's HELLO
+before the manifest is built. The dispatcher keeps it as **`Dispatcher.LinkMinor`** (and `Dispatcher.Speaks11`); the same property
+is `SessionState.LinkMinor`. Every 1.1 addition is for a link where it is at least 1 (protocol 4.1): a function, type or event
+registered with `MinMinor` 1 is not in the manifest of a 1.0 link, and the dispatcher answers `unknown_op` for such a function. The
+HELLO always says `proto_minor` 1. The key `player_classes` is written only for 1.1 and only when a lane called
+`AddPlayerClass`; the key `params` of an event only for 1.1 (below it the event has its 1.0 behaviour).
+
+### Lanes and id ranges
+
+The manifest is collected by `Manifest.Collect(linkMinor)`: `RegisterCore`, then one method per lane in the order of the table,
+each in a file of its own (`Gk/Manifest.Items.cs`, `Manifest.Start.cs`, `Manifest.Gmaps.cs`, `Manifest.Wave5A.cs` to `Wave5D.cs`; a
+lane edits its own file only). The method gets a `ManifestBuilder`: `AddFunction(lane, FunctionDef)`, `AddType(lane, TypeDef)`,
+`AddEvent(lane, EventDef)`, `AddPlayerClass(name)`. The builder throws `InvalidOperationException` (found by the first test run) for
+an id outside the lane's range, a duplicate id or name, a type name that is not one of the protocol's, a `ref` name without
+`MinMinor` 1, a `handle:` or `ref:` type that is not in the manifest, and an event target or mode that is none. Ids stay unique
+across the whole manifest (members and methods together), as the protocol asks. The ranges, kept equal to `Lane` by a test:
+
+| Lane | Functions | Types | Members and methods |
+| --- | --- | --- | --- |
+| core | 64 to 999 | 1 to 9 | 1 to 999 |
+| 4C | 1000 to 1999 | 10 to 19 | 1000 to 1999 |
+| 4D | 2000 to 2999 | 20 to 29 | 2000 to 2999 |
+| 4G | 3000 to 3999 | 30 to 39 | 3000 to 3999 |
+| 5A | 4000 to 4999 | 40 to 49 | 4000 to 4999 |
+| 5B | 5000 to 5999 | 50 to 59 | 5000 to 5999 |
+| 5C | 6000 to 6999 | 60 to 69 | 6000 to 6999 |
+| 5D | 7000 to 7999 | 70 to 79 | 7000 to 7999 |
+
+The core uses functions 64 to 67, types 1 to 3, members and methods 100 to 545. A lane's 1,000 member ids are split: the first 500
+are for its members and methods of `TMudObject`, the next 250 for `TMudPlayer`, the last 250 for its own new types
+(`Lane.ObjectMembersFirst`, `PlayerMembersFirst`, `OwnTypesMembersFirst`).
+
+**Functions.** `new FunctionDef(id, name, params, ret, Slow: false, Handler: ..., MinMinor: 0)`: `id` is also the operation number,
+and `Handler` (`Func<Dispatcher, IReadOnlyList<Val>, Outcome>`) is what the dispatcher runs for it, in the worker, with the request's
+arguments unchecked (the handler checks them). A lane's handlers are methods of its own partial file of `Dispatcher`
+(`Dispatcher.Items.cs`, for example), so that they reach the dispatcher's private state.
+
+**Members of the existing types.** `TMudObjectMembers` and `TMudPlayerMembers` are partial. A lane implements
+`static partial void ExtendItems(FieldBuilder<T> b, List<MethodDef> methods)` (`ExtendStart`, `ExtendGmaps`, `ExtendWave5A` to
+`5D` likewise) in `Gk/TMudObjectMembers.Items.cs` and so on, for `LevelObject` and for `PlayerState` separately; the builder is
+already set to the lane's range for that type, and a lane that uses up its range gets an exception. A method's id is
+`b.NextMethodId()`. A partial method that is not implemented adds nothing. The binding of a new member to the handle's target is the
+lane's work in `BindMember` when it adds a new target class.
+
+**Tests.** `ExtensionOptions.ExtraManifest` registers what only a test needs, after the lanes.
+
+### The player controller
+
+`Gk/PlayerController.cs`: `Player : IPlayerHandle` is the C `struct pl` as far as phase 3 reads it: `Count`, `CountLeft` (uint),
+`Mark` (`CfObject?`) with `MarkCount` (uint: the tag the marked object had), `Mode` (uint), `LastUsed` with `LastUsedId`, and
+`WeightLimit` (long, for lane 4C), with `State` (the `PlayerState`) and `Account`. It is made at `player.login` (the first login of
+the account; a second login keeps it) and set as `PlayerState.Ob.Contr` (also `PlayerState.Contr`); `player.logout` sets `Contr`
+to null and drops a flush that was asked for. `Dispatcher.ControllerOf(account)` finds it.
+
+`Player.Shown` is the `ShownTable`: `Sent` (the whole flag name with the text the client holds), and the tags marked by the ported
+C's `esrv_*` calls: `MarkDirty(tag)`, `MarkRemoved(tag)` (the last mark wins, each tag is in one list, in the order of first
+marking), `Dirty`, `Removed`, `ClearMarks()`. A mark calls `Player.Touch()`, which puts the controller in the dispatcher's list for
+the end of the request (once). Lane 4C writes the flush.
+
+### The flush at the end of a request
+
+At the end of a request that ends with status 0 and before its REPLY is built (`Dispatcher.Handle`), `FlushControllers` takes each
+controller that asked for a flush, in the order it asked, once, and calls `partial void FlushShown(PlayerState)` (4C implements it
+in `Dispatcher.Items.cs`; it sets the strings with `SetClientString` (internal) and effects with `effects`, clears the marks) and
+then the test hook `ExtensionOptions.FlushHook`. The flush's effects follow those the request made itself. After a request that
+fails nothing is flushed and the marks stay for the next request that succeeds. When the REPLY is then replaced by `too_large`, the
+effects are lost: every controller of that flush gets `Shown.Forget()` (`Sent` cleared, `NeedsResend` true, flushed again at the
+next request), and 4C's flush sends everything again when `NeedsResend` is true.
+
+### Slow functions and `busy`
+
+`FunctionDef.Slow` is the manifest's `slow`. `Dispatcher.Busy` (a text, null when not busy; lane 4F sets it while the worker saves or
+recovers) makes the dispatcher answer error 7 `busy` with that text, before the handler runs, for a lane's function that is `Slow`.
+Code that changes items or money and is not such a function (a method of a type) calls `Dispatcher.CheckBusy()` first and returns
+its outcome when it is not null. A function that is not slow runs while busy.
+
+### Events from any part
+
+On the dispatcher (`Dispatcher.Events.cs`), for a lane's code in the worker; the event must be registered with the same target:
+
+- `EmitItemEvent(name, target, type, classes, args, fallback = null)`: an event of target `item` (protocol 11.1): `target` is the
+  object whose handle the proxy takes (`HandleTable` keys: a `CfObject` or a wrapper, the lane's choice, the same as it gives out for
+  that item elsewhere), `type` a manifest type name, `classes` the script classes of the object. The keys are written in the order
+  `name`, `target`, `handle`, `type`, `classes`, `args`, `fallback`. **On a 1.0 link nothing is added** and the result is
+  `EmitResult.NotSent`. A name nobody registered, a type that is not in the manifest are programming faults (`InvalidOperationException`:
+  the request is `internal`).
+- `EmitPlayerEvent(name, account, args, fallback = null)` and `EmitObjectEvent(name, target, args, fallback = null)`: events of the
+  1.0 targets with the 1.1 `fallback` (11.1); on a 1.0 link the event is sent without the fallback (`EmitResult.SentWithoutFallback`),
+  so the caller knows that the host will not replace a missing function.
+- `Dispatcher.TextFallback(account, text)` (the effect `client.text`) and `dispatcher.InvokeFallback(method, target, args)` (the invoke
+  map) make the two kinds of fallback.

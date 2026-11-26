@@ -88,17 +88,20 @@ internal sealed class DirectExt : IExt
     private ulong nextReq = 1;
     private bool ended;
 
-    public DirectExt(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool ownsWorld = true, long maxFrame = 16_777_216)
+    public DirectExt(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool ownsWorld = true, long maxFrame = 16_777_216, long protoMinor = 0)
     {
         World = world;
         this.ownsWorld = ownsWorld;
         options ??= new ExtensionOptions { Writer = new FileWriterOptions { Quiet = TimeSpan.FromMilliseconds(20), MaxDelay = TimeSpan.FromMilliseconds(100) } };
-        HostHello hello = HostHello.Parse(ScriptedHost.HostHello(world.Path, epoch, maxFrame: maxFrame));
+        HostHello hello = HostHello.Parse(ScriptedHost.HostHello(world.Path, epoch, maxFrame: maxFrame, protoMinor: protoMinor));
         dispatcher = new Dispatcher(hello, (int)maxFrame, (level, text) => Logs.Add(new LogFrame((ulong)level, text)), options, new Counters());
         Assert.Equal(0UL, Call(1).Status);
     }
 
     public TempFolder World { get; }
+
+    /// <summary>The dispatcher the requests go to (a test calls the parts of the extension on it).</summary>
+    internal Dispatcher Dispatcher => dispatcher;
 
     public List<LogFrame> Logs { get; } = new();
 

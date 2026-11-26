@@ -31,6 +31,7 @@ internal sealed partial class Dispatcher
             return Outcome.Ok(Val.Nil);
         }
         players[account] = player;
+        AttachController(player);
         SendClientStrings(player);
         events.Add(Val.Map(
             ("name", Val.Str(Manifest.EventOnLoadedMudAccount)),
@@ -139,6 +140,7 @@ internal sealed partial class Dispatcher
             effects.Add(Val.Map(("k", Val.Str("client.del")), ("player", Val.Str(player.Account)), ("name", Val.Str(name))));
         }
         handles.Kill(player);
+        DetachController(player);
         players.Remove(player.Account);
         FreeCfObject(player.Ob);
         return Outcome.Ok(Val.Nil);
@@ -165,7 +167,7 @@ internal sealed partial class Dispatcher
     }
 
     /// <summary>Sets one of the player's client strings (the whole flag name) when its value is not what the client has.</summary>
-    private void SetClientString(PlayerState player, string name, string value)
+    internal void SetClientString(PlayerState player, string name, string value)
     {
         if (player.ClientStrings.TryGetValue(name, out string? old) && old == value)
         {

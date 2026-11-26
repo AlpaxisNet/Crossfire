@@ -125,6 +125,7 @@ internal sealed class FieldBuilder<T>
     private readonly List<ObjMember<T>> list = new();
     private readonly Func<T, CfObject> of;
     private int next;
+    private int last = int.MaxValue;
 
     public FieldBuilder(int firstId, Func<T, CfObject> of)
     {
@@ -136,8 +137,23 @@ internal sealed class FieldBuilder<T>
 
     public int NextId => next;
 
+    /// <summary>
+    /// Continues the numbering at <paramref name="first"/> and refuses an id above <paramref name="lastId"/>: a lane adds its members
+    /// with the range its <see cref="Lane"/> gives for this type (<see cref="Lane.ObjectMembersFirst"/> and the like).
+    /// </summary>
+    public void UseRange(int first, int lastId)
+    {
+        next = first;
+        last = lastId;
+    }
+
+    /// <summary>The next id for a method of the type (methods and members share the numbering).</summary>
+    public int NextMethodId() => TakeId();
+
+    private int TakeId() => next <= last ? next++ : throw new InvalidOperationException("the lane's range of member ids is used up");
+
     public void Add(string name, string type, bool writable, bool stable, Func<IMemberEnv, T, Val> read, Func<IMemberEnv, T, Val, SetResult>? write, string? client = null) =>
-        list.Add(new ObjMember<T>(next++, name, type, writable, stable, read, write, client));
+        list.Add(new ObjMember<T>(TakeId(), name, type, writable, stable, read, write, client));
 
     /// <summary>A number field: <paramref name="min"/> and <paramref name="max"/> are the range of the C type (a value outside is clamped).</summary>
     public void Int(string name, Func<CfObject, long> get, Action<CfObject, long>? set, long min, long max, bool stable, string? client = null) =>
