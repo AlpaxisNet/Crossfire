@@ -155,9 +155,10 @@ addition is for a link whose minor version is at least 1, and for none other:
   that speaks 1.1 may send `proto_minor` 1 even to a 1.0 host: the 1.0 host accepts it and the link is 1.0.
 - The **host** offers 1.1 behaviour (the operation `gmap.layout`, the answers to `player.pos` and `player.at`, the handling of the
   1.1 manifest keys, event keys and effects) only when the extension's `proto_minor` is at least 1. A manifest of an extension whose
-  `proto_minor` is 0 is read by the 1.0 rules: a 1.1 key in it is ignored, and an event target `item`, a `params` of an event or the
-  type name `ref` in it makes it invalid. A 1.0 host that meets one of these in a manifest is in the same case (a failed start), which
-  is why an extension follows the rule above.
+  `proto_minor` is 0 is read by the 1.0 rules: a 1.1 key in it (`player_classes`, an event's `params`) is ignored, as every key the
+  reader does not know is (section 3.2), and an event target `item` or the type name `ref` in it makes it invalid. A 1.0 host that
+  meets `item` or `ref` is in the same case (a failed start); one that meets `params` or `player_classes` ignores them, and runs the
+  events with the 1.0 conversion (section 11), which is why an extension follows the rule above.
 - After a reconnection both HELLOs are read again and the link's minor version is decided again; the manifest must still be equal
   (section 6).
 
@@ -218,7 +219,7 @@ whose low 32 bits are the extension's **tag** for the object.
 - **Epochs.** A new process starts with no tags in use. The extension never gives a handle of another epoch than its connection's.
   A handle of another epoch is dead: the host turns it into nil, the extension answers `bad_handle` where a live object is needed.
 - **Releases.** The host lists a handle in `releases` only when, at the moment it writes the REQ, it holds no script object for it
-  (so a handle it was given again in the meantime is not released). It sends at most 4,096 handles in one REQ and keeps the rest for
+  (so a handle it was given again in the meantime is not released; (1.1) a deferred item event that the host still holds counts as a script object, section 11.1). It sends at most 4,096 handles in one REQ and keeps the rest for
   later REQs; it never sends a REQ for releases alone; `releases` is empty in `session.init`. The extension applies the releases
   **before** the REQ's operation, ignores dead, unknown and never-issued handles in them, and may then forget an object that nothing
   in its world holds; an object in a level, an inventory, a player or the archetypes keeps its tag. Handles of objects shown by level
@@ -237,7 +238,9 @@ whose low 32 bits are the extension's **tag** for the object.
   The extension chooses what it sends: for an owner it sends the handle of an online player (a player whose `player.login` handle
   the extension holds) and otherwise the owner's name as a string.
 - (1.1) **Typed handles of a type whose `host` is `player`**, in the `params` of an event (section 11), resolve to the player bound
-  to the handle, else as in the first bullet.
+  to the handle, else as in the first bullet. A known asymmetry: elsewhere (arguments, results, members) a `handle:<T>` of such a
+  type is still the proxy of `T`, while a `ref` gives the bound player first, so the same handle read through the two types gives two
+  different script objects there.
 
 ## 6. The manifest
 
@@ -264,9 +267,10 @@ maps without regard to the order of keys), or the host runs without the extensio
   `ref` and `ref:<type>` (an object or a text, section 5; the type, when given, must exist; it is where `ref` is allowed: anywhere
   a type name is, `params`, `ret`, a member's `type` and the `params` of events, and as the element of a list). Any other name makes
   the manifest invalid.
-- (1.1) The key `player_classes`, the event target `item`, an event's `params` and the type names `ref` and `ref:<type>` are valid
-  only in the manifest of an extension whose `proto_minor` is at least 1, and an extension builds them only for a host whose
-  `proto_minor` is at least 1 (section 4.1).
+- (1.1) The key `player_classes`, the event target `item`, an event's `params` and the type names `ref` and `ref:<type>` are for a
+  link whose minor version is at least 1, and an extension builds them only for a host whose `proto_minor` is at least 1 (section
+  4.1). A host reads a manifest of an extension whose `proto_minor` is 0 by the 1.0 rules: it ignores `player_classes` and `params`
+  (unknown keys), and the target `item` and the type names `ref` make the manifest invalid.
 - A manifest that breaks this section is invalid: a failed start (section 1).
 
 ### 6.1 Stable members
@@ -288,7 +292,7 @@ are:
 - `player`: also on the host's player objects, for the player of the handle `player.login` gave. At most one type has host `player`,
   and `player.login` gives handles of that type; it must exist if the extension answers `player.login` with a handle.
 - (Clarified in 1.1.) **Script variables and members.** On an NPC that shows **no** object, a member's name is not a member but
-  the NPC's script variable of that name (`this.<name>`): a read gives its value and a write sets it, with no request. On an NPC
+  the NPC's script variable of that name (`this.<name>`): a read gives its value and a write sets it, with no request (for a member with access "r" a write is not a script-variable write: no variable is set). On an NPC
   that shows an object of the type, the member wins (the NPC is a face of the object). On players the 1.0 rule stays: the member
   of that name, nil where the player has no MUD part, so that a script variable of the same name is not reachable that way.
 - (1.1) **Player classes.** When the host binds a player to the handle that `player.login` gave (the first login of the account on
@@ -339,8 +343,9 @@ the manifest does not have is `unknown_op`).
 | 64+ | a manifest function | as its `params` | as its `ret` |
 
 **Level names.** (Clarified in 1.1.) Level names compare without regard to ASCII case (`A` to `Z` against `a` to `z`; level names are
-ASCII), wherever a name is compared: `ctx.level`, `level.load`, `level.unload`, `npc.place`, the queries. The extension answers an
-object's level by the spelling the host gave it in `level.load`. A gmap's name (section 7.1) is a level name for this rule.
+ASCII), wherever a name is compared: `ctx.level`, `level.load`, `level.unload`, `npc.place`, the queries. A side may answer in any
+spelling (the Crossfire extension answers in lower case) and a receiver compares without case: the same holds for the segment names
+of `gmap.layout`, so that a layout that repeats a segment name in another case repeats it. A gmap's name (section 7.1) is a level name for this rule.
 
 **Handles in requests.** Where an operation needs a live object, a nil, dead, never-issued or wrong-epoch handle is `bad_handle`. A
 member or method id that does not exist or does not belong to the object's type, or a `set` of a member with `access` "r", is
@@ -357,7 +362,7 @@ position in it, and every level name that the extension sends to the host or rea
 resolving (and not the host, which would have to guess which arguments are positions) from a layout that the host tells it.
 
 **`gmap.layout`** (op 17) `[gmap, width, height, segments, size]`: `gmap` the gmap's name; `width` and `height` ints, at least 1, the
-number of segments in a row and of rows; `segments` a list of `width * height` strings, the segments' level names row by row, left to
+number of segments in a row and of rows; `segments` a list of `width * height` strings (at most 4,096), the segments' level names row by row, left to
 right inside a row (the segment at column `c`, row `r` is `segments[c + r * width]`), the empty string for a cell that has no level;
 `size` an int at least 1, the side of a segment in tiles (64 for every Graal gmap). The result is nil. The rules:
 
@@ -369,11 +374,12 @@ right inside a row (the segment at column `c`, row `r` is `segments[c + r * widt
   also the name of a level the host serves, is not announced: the extension keeps 1.0 behaviour for the name. The reply carries no
   effects and no events.
 - The extension answers `bad_args` to a request whose list is not `width * height` strings, whose numbers are out of range, or
-  that repeats a non-empty segment name (and keeps no layout of that gmap: 1.0 behaviour for the name), and nil otherwise. A name
+  that repeats a non-empty segment name (compared without ASCII case, section 7), or whose `width` or `height` is more than 4,096 or
+  whose `width * height` is more than 4,096 (and keeps no layout of that gmap: 1.0 behaviour for the name), and nil otherwise. A name
   the extension has no layout for is a level name.
 - **Resolving.** For a gmap `G` that has a layout and a position (`x`, `y`) in its tiles (numbers, fractions allowed), the column is
   `floor(x / size)`, the row `floor(y / size)`, and the segment is `segments[column + row * width]`; the position in the segment is
-  `(x - column * size, y - row * size)`. A position outside the grid, or in a cell with an empty name, belongs to no segment: the
+  `(x - column * size, y - row * size)`. A position outside the grid, with a component that is NaN or infinite, or in a cell with an empty name, belongs to no segment: the
   operation that needed one fails as the extension's rules say for a place with no level (a drop is refused, an object is not made),
   and nothing is sent for it.
 - **Where the extension uses it.** Wherever a request names a level together with a position (the `ctx.level` of a script with the
@@ -384,12 +390,15 @@ right inside a row (the segment at column `c`, row `r` is `segments[c + r * widt
   the segment's tiles (the NPC walked away) is kept as the host sent it, in the rows of `objects.blobs`, which are in the tiles of
   the NPC's own level.
 - **Queries.** The extension sends segment names. For `level.near` with a gmap's name it asks every segment that the circle
-  touches, with the centre written in that segment's tiles (it may lie outside `0` to `size`, and the host accepts any finite
-  number), and it merges the rows (translating each row back to gmap tiles for a script that is on the gmap); `level.blocked` asks
-  the one segment of the position, and `level.loaded` the segment of a position or a segment name. The rows of `npc.pos` already name segments; for a script on the gmap the extension
+  touches **and every other loaded segment that holds an object** (the host finds the NPCs of a segment by their position in that
+  segment's own tiles, and an object keeps its segment when its NPC walks into the area of another one: a circle that touches only
+  the other segment would miss it), with the centre written in each segment's tiles (it may lie outside `0` to `size`, and the host
+  accepts any finite number), and it merges the rows (translating each row back to gmap tiles for a script that is on the gmap);
+  `level.blocked` asks the one segment of the position (it depends on the tile, not on an object), and `level.loaded` the segment
+  of a position or a segment name. The rows of `npc.pos` already name segments; for a script on the gmap the extension
   gives positions in the gmap's tiles (`column * size + x`, `row * size + y` of the segment `ctx.level`'s layout puts it in).
-  `player.pos` answers a segment and the position in it (section 12); for a script on the gmap the extension may translate it the
-  same way.
+  `player.pos` answers a segment and the position in it (section 12); for a script on a gmap that has a layout (the `ctx.level` of the
+  request that asks) the extension **must** translate it the same way, into the gmap's tiles.
 - On a link below 1.1 nothing of this applies and the extension does what 1.0 said.
 
 ## 8. Error codes
@@ -431,7 +440,7 @@ effect for a level that is not loaded are skipped and counted; the host never lo
 | `client.set` | `player` (account), `name` (string), `value` | sets the player's string `name`, the whole flag name with its prefix (`clientr.mud_hp`, `client.mud_item12`), to `value` as text |
 | `client.del` | `player`, `name` | deletes that string |
 | `client.text` | `player`, `text` (string) | shows the text to the player as an RPG message (what the script function `player.sendrpgmessage` does) |
-| (1.1) `caller.setprop` | `name` (string), `value` | sets one property of the **caller**: the NPC whose script made the request that this REPLY answers (the level NPC that is `this` of the running script), with the rules of `npc.setprop` for names and values. It is skipped and counted when the request was not made by the script of a level NPC (a request of the host's own: `session.*`, `player.login`, `player.logout`, `level.*`, `objects.blobs`, `gmap.layout`; or a script that has no NPC), or when the NPC is gone by the time the effect is applied |
+| (1.1) `caller.setprop` | `name` (string), `value` | sets one property of the **caller**: the NPC whose script made the request that this REPLY answers (the level NPC that is `this` at the moment of the call: under `with (other)` the NPC that `with` names, if it is a level NPC; a database NPC or the control NPC is not one), which the host remembers per outstanding request, with the rules of `npc.setprop` for names and values. It is skipped and counted when the request was not made by the script of a level NPC (a request of the host's own: `session.*`, `player.login`, `player.logout`, `level.*`, `objects.blobs`, `gmap.layout`; or a script that has no NPC), or when the NPC is gone by the time the effect is applied. In a late REPLY (the script's call has returned already) it still applies, to the remembered NPC |
 | `client.item`, `output` | | reserved: the extension must not send them in 1.0, and the host skips them |
 
 **Property names** in `props`, `npc.setprop` and (1.1) `caller.setprop`: a name `this.<variable>` sets that script variable of the NPC (the variable's name
@@ -442,8 +451,9 @@ skipped and counted; position and level change only through `npc.place`. A `clie
 ## 11. Events
 
 An event is a map: `name` (string, a manifest event), `target` (the manifest's target for it), `handle` (for target `object`, and (1.1) for
-target `item`), `player` (the account, only for target `player`), `args` (list), and (1.1) for target `item` `type` (string) and
-`classes` (list of strings, *optional*, default []), and for an event of any target (1.1) `fallback`. The host fires the events of a
+target `item`), `player` (the account, only for target `player`), (1.1) for target `item` `type` (string) and `classes` (list of
+strings, *optional*, default []), `args` (list), and for an event of any target (1.1) `fallback`; an encoder writes the keys in this
+order (section 3.2). The host fires the events of a
 REPLY in order after its effects:
 
 - `object`: the event runs on the level NPC that shows the object (`this` is the NPC), with `args` as the parameters.
@@ -456,13 +466,13 @@ next script frame. The events of a late REPLY, and `sync` events nested more tha
 make requests of its own: each is a new REQ, sent after the REPLY that fired the event was read, and its own effects and events are
 applied at its own REPLY, before the remaining events of the first. An event with an unknown name, a target other than the manifest's,
 a missing key, an object no NPC shows (target `object`), or a player who is not online is skipped and counted. (1.1) A `sync` event
-may also run deferred when the host cannot run it nested, as 11.1 says for items; the host counts it.
+of target `item` (and of no other target) may also run deferred when the host cannot run it nested, as 11.1 says; the host counts it.
 
 **(1.1) Typed parameters (`params`).** An event whose manifest entry has `params` (a list of type names, as for functions: `int`,
 `float`, `bool`, `string`, `any`, `handle:<type>`, `ref`, `ref:<type>`, `list`, `list:<type>`; not `void`) is called with `args`
 converted like the arguments of a function (section 6.3), in order. `args` must have exactly as many elements as `params`, and an
 element that is nil is the zero of its type (section 6.3); otherwise the event is skipped and counted. A `handle:<type>` parameter
-is resolved as section 5 says for a typed handle (a type whose `host` is `player` gives the bound player first). An event without
+is resolved as section 5 says for a typed handle (a type whose `host` is `player` gives the bound player first). On a link below 1.1 `params` is ignored. An event without
 `params` has the 1.0 behaviour: each element of `args` is converted as a value of type `any`, so that a handle becomes the NPC that
 shows it, else the player bound to it (section 5), and a nil is the engine's nil (0).
 
@@ -477,6 +487,14 @@ host does, in this order:
    that a script holds if it holds one). An NPC that shows the object does not change this: the event of an item runs on the proxy,
    whether or not an NPC shows the object. A handle that is nil, dead or of another epoch, a `type` that is not a manifest type, a
    `classes` that is not a list of strings, or a proxy of the handle that already has another type, skips and counts the event.
+   **What the host keeps.** The state of an item's proxy (the classes joined to it, whether each one has been initialised, and its
+   `this.<variable>`s) belongs to the **handle and its epoch**, not to a script object: the host keeps it until the handle is
+   listed in `releases` or the epoch ends, even if no script holds the proxy for a while (the host may keep the proxy itself alive
+   to do so). A later event of the handle therefore finds the classes joined, the init not repeated and the variables as the last
+   event left them. A handle has one proxy type in an epoch, the type of the first proxy the host made for it; an event whose `type`
+   differs skips and counts. A deferred item event that the host holds counts as a script object for the handle (section 5): the
+   host does not list the handle in `releases` until the event has run or been skipped. An extension that forgets a handle anyway
+   has the event skipped and counted (a dead handle).
 2. **Joining and init.** It joins the proxy to each class of `classes` that is not yet joined to it (a name the host has no class
    for is skipped and counted; a class is joined as `join` does, its first lines run, and a class they join in turn counts as a new
    one). Then, for each class newly joined in this step, in the order of joining, it runs that class's `onCreated` once on the proxy
@@ -488,8 +506,14 @@ host does, in this order:
    for a script that the player's own object runs); with no player context they are nil and the writes do nothing.
 4. **The call.** It runs the function named `name` on the proxy, `this` being the proxy, with `args` as the parameters (typed by
    `params` when the manifest gives them), in the player context, as a script run by an event (a request that it makes is a new REQ).
-5. **No function.** When no class joined to the proxy defines a function `name`, the event does not run, and the `fallback` below runs
-   in its place; when the event has no `fallback` it is skipped and counted. (The init of step 2 has been done in either case.)
+5. **No function.** When no class joined to the proxy defines a function `name` (names compare without ASCII case, as script
+   functions do), the event does not run, and the `fallback` below runs in its place; when the event has no `fallback` it is skipped
+   and counted. (The init of step 2 has been done in either case.)
+
+The `type` of an item event may be any manifest type: every type has a proxy form (section 6.2), also one whose `host` is `npc` or
+`player`; the proxy is never the level NPC or the bound player, whatever the `host`. The player context of step 3 is only a handle
+(or a `ref` that arrives as a handle) of a bound player: a string account in `args`, even one of an online player, gives no player
+context.
 
 **Re-entry.** A host may refuse to run an event of target `item` nested inside a script that is already running a class that the
 event needs (two events on the same class machine in one stack). It then runs the event deferred (as a `sync` event nested more than
@@ -507,10 +531,22 @@ REPLY (the order of the REPLY).
   the method's arguments. The host makes the request `invoke` (op 13) of the handle with that method as a new REQ, as a script's
   call does, after the REPLY that fired the event was read: its result is not used, its effects and events are applied at its REPLY.
 
-The host runs the fallback **only when no class joined to the event's target defines the event's function**: for `object` the NPC,
-for `player` the player, for `item` the proxy, for `global` none of the global script objects. It runs it in the event stage, at the
-position and with the mode of the event (`sync` at once, `deferred` in the next frame), and for the events of a late REPLY deferred
-as these are. A fallback that is not an effect or invoke map, or that fails its rules, is skipped and counted.
+The host runs the fallback **only when no class joined to the event's target defines the event's function** (names compare without
+ASCII case): for `object` the NPC, for `player` the player, for `item` the proxy, for `global` none of the global script objects. It
+runs it only when the missing function is the **only** reason the event does not run: an event that is skipped for another reason (no
+NPC shows the object, the player is offline, a wrong number of `args` for `params`, a dead handle, a host that does not run events or
+scripts at that moment) runs no fallback. It runs it in the event stage, at the position and with the mode of the event (`sync` at
+once, `deferred` in the next frame), and for the events of a late REPLY deferred as these are. A fallback that is not an effect or
+invoke map, or that fails its rules, is skipped and counted.
+
+- The `ctx` of the REQ of an invoke fallback is `player`: the player of the event (for `item` the player context of step 3, for
+  `player` the event's player, else nil) and `level`: the level of the NPC (for `object`, a segment's name on a gmap), else nil.
+- An invoke fallback that ends in an error status is counted and logged; nothing else happens, and the event is not run again.
+- An invoke fallback counts as a nested call for the depth rule of section 11: the events of its REPLY, and their fallbacks, run
+  deferred beyond depth 8. A host may in addition stop a chain of more than 64 fallbacks in a row and count it.
+- An invoke fallback is a REQ made after the REPLY that fired the event was read. When that REPLY answers `session.shutdown` (the
+  last REQ) no REQ follows: an invoke fallback is skipped and counted, an effect fallback is applied. In the REPLY of `session.init`,
+  `session.flush` or `level.load` an invoke fallback is made as in any other.
 
 ## 12. Queries
 
@@ -521,10 +557,10 @@ as these are. A fallback that is not an effect or invoke map, or that fails its 
 | `npc.pos` | `[handles: list]` | a list of rows `[x, y, level]` in order, nil for an object no NPC shows |
 | `player.exists` | `[account: string]` | bool: the player is online |
 | `level.loaded` | `[level: string]` | bool |
-| (1.1) `player.pos` | `[account: string]` | `[level, x, y]`: the level's name (a segment's, on a gmap) and the player's position in that level's tiles (numbers, fractions allowed); nil for an account that is not online. Asked on a link below 1.1 the host answers status 1 |
-| (1.1) `player.at` | `[account: string, index: int]` | the account (a string) of the player at position `index` (counted from 0) in the `players` of the level that the player `account` is in, in the order a script sees them (the player `account` included); nil when `account` is not online or `index` is out of range. Asked on a link below 1.1 the host answers status 1 |
+| (1.1) `player.pos` | `[account: string]` | `[level, x, y]`: the level's name (a segment's, on a gmap) and the player's position in that level's tiles (numbers, fractions allowed); nil for an account that is not online or whose player is in no level. Asked on a link below 1.1 the host answers status 1 |
+| (1.1) `player.at` | `[account: string, index: int]` | the account (a string) of the player at position `index` (counted from 0, converted as section 3.2 says for numbers) in the `players` of the **script level** of the player `account`, in the order a script sees them (the player `account` included): that is the level the player is in, and for a segment of a gmap the whole gmap (the players of all its segments). An entry that is not one player of its own account (a guest: all guests share the account `guest`; a remote-control or NPC-Server player; a player without an account) counts in the index and is answered as nil. Nil also when `account` is not online or is in no level, and when `index` is negative or out of range. Asked on a link below 1.1 the host answers status 1 |
 
-Level names in a query compare as section 7 says. The handles in query results name objects shown by NPCs; they are not references the host must
+(Clarified in 1.1.) An account that more than one online player has (all guests have `guest`) is answered for the first of them. Level names in a query compare as section 7 says. The handles in query results name objects shown by NPCs; they are not references the host must
 release. (1.1) `player.pos` and `player.at` answer for an account that is online with or without a MUD part, and their answers are
 read only: they run no script. Where the player's level is a gmap segment, `level` is the segment's name and `x`, `y` are local
 to it (section 7.1).
