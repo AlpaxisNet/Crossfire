@@ -66,7 +66,7 @@ internal static class ReadableWorld
         return Outcome.Ok(answer == null ? Val.Nil : Val.Int(answer.Value));
     }
 
-    public static TempFolder MakeWorld(string account, string inventory)
+    public static TempFolder MakeWorld(string account, string inventory, string header = "")
     {
         TempFolder world = TestWorld.Make(arc: Arc);
         Directory.CreateDirectory(Path.Combine(world.Path, "scripts"));
@@ -78,7 +78,7 @@ internal static class ReadableWorld
         File.WriteAllText(Path.Combine(world.Path, "mudlevels", "hall"), HallSeed);
         File.WriteAllText(Path.Combine(world.Path, "mudlevels", "annex"), "arch map\nname annex\nwidth 8\nheight 8\nend\n");
         File.WriteAllText(Path.Combine(world.Path, "treasures"), Treasures);
-        ItemWorld.Account(world, account, "", inventory);
+        ItemWorld.Account(world, account, header, inventory);
         return world;
     }
 
@@ -94,9 +94,9 @@ public sealed class ReadableTests
 {
     private sealed class Game : IDisposable
     {
-        public Game(string inventory = "", ExtensionOptions? options = null)
+        public Game(string inventory = "", ExtensionOptions? options = null, string header = "")
         {
-            Ext = new DirectExt(ReadableWorld.MakeWorld("bob", inventory), options ?? ReadableWorld.Options(), 1, true, 16_777_216, 1);
+            Ext = new DirectExt(ReadableWorld.MakeWorld("bob", inventory, header), options ?? ReadableWorld.Options(), 1, true, 16_777_216, 1);
             Assert.Equal(0UL, Ext.Call(5, new[] { S("bob") }, player: "bob").Status);
             Hall = Say.LoadAll(Ext, "hall").Places.Select(p => p.Get("handle")!.AsHandle).ToList();
             // the literacy skill is readied by lane 6B's apply_special; a stand-in readies it here
@@ -507,6 +507,9 @@ public sealed class ReadableTests
         g.World.Random = () => rolls[Math.Min(next++, rolls.Length - 1)];
     }
 
+    /// <summary>The lines of an account whose stats were rolled, so that fix_player works on it fully.</summary>
+    private const string Rolled = "mudorigstats 14 12 10 9 7 8 11\nmudlevhp 8 8 8 8 8 8 8 8 8 8\nmudlevsp 3 3 3 3 3 3 3 3 3 3\nmudlevgrace 2 2 2 2 2 2 2 2 2 2\nlevel 1\n";
+
     private static void Strong(Game g) => g.Pl.Stats.Dam = 10; // a weak attack saves what it hits (did_make_save_item)
 
     [Fact]
@@ -527,20 +530,19 @@ public sealed class ReadableTests
     public void ApplyLighter_Given_a_marked_torch_that_burns_When_lit_Then_it_becomes_the_lit_torch_and_a_charge_is_used()
     {
         // Arrange: the roll 1 does not save a torch of wood (fire save 13)
-        using var g = new Game("arch lighter\nlast_eat 1\nfood 3\nend\narch torch\nend\n");
+        using var g = new Game("arch lighter\nlast_eat 1\nfood 3\nend\narch torch\nend\n", header: Rolled);
         CfObject lighter = g.Item("lighter");
         g.Control.Mark = g.Item("torch");
         g.Control.MarkCount = g.Item("torch").Count;
         Strong(g);
         Roll(g, 0);
-        g.Control.WeightLimit = 0;
 
         // Act
         ReplyFrame r = g.Apply(lighter);
 
         // Assert
         Assert.Equal(new[] { "You light the torch with the lighter." }, Lines(r));
-        Assert.NotEqual(0, g.Control.WeightLimit); // fix_player ran: it sets the weight limit
+        Assert.Equal(3, g.Pl.GlowRadius); // fix_player ran after the lit torch came in: the player shines with it
         Assert.Equal(new[] { "lighter", "lit torch" }, g.Names()); // a torch that glows is replaced by its other_arch: no burnout
         Assert.Equal(2, lighter.Stats.Food);
         Assert.True(g.Item("lit torch").QueryFlag(Define.FLAG_IDENTIFIED)); // made by NewItem
