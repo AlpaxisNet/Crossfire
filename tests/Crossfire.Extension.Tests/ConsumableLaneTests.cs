@@ -127,7 +127,8 @@ public sealed class ConsumableLaneTests
 
         // Assert
         Assert.Equal(1, r.Result.AsInt);
-        Assert.Equal(Consumable.NotAvailable, Lines(r)[^1]);
+        // the skill check of manual_apply runs first: a player without the skill of using magic items is told so, as in C
+        Assert.Equal(new[] { "You have no knowledge of use magic item.", "You can't use that!", Consumable.NotAvailable }, Lines(r));
         Assert.DoesNotContain(r.Events, e => e.Get("name")!.AsString == "onEatFood");
         Assert.Equal("potion_heal", ((Player)ext.Dispatcher.ControllerOf("bob")!).State.Ob.Inv?.Arch?.Name);
     }
