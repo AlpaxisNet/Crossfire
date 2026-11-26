@@ -203,7 +203,8 @@ public sealed class SkeletonTests
         Assert.True(Val.Same(Manifest.Build(false, 1), manifest));
         Assert.Equal(new[] { "onRPGMessage" }, manifest.Get("events")!.Items.Select(e => e.Get("name")!.AsString).Where(n => n.StartsWith("onRPG")));
         Assert.Equal(new[] { "mudplayers" }, manifest.Get("player_classes")!.Items.Select(c => c.AsString));
-        Assert.DoesNotContain(manifest.Get("events")!.Items, e => e.Get("target")!.AsString == "item");
+        // the item events are the lanes' of wave 6 (6B declares onApply); waves 4 and 5 declared none
+        Assert.Contains(manifest.Get("events")!.Items, e => e.Get("target")!.AsString == "item" && e.Get("name")!.AsString == "onApply");
     }
 
     [Fact]

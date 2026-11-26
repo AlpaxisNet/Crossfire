@@ -26,6 +26,52 @@ internal sealed class GkSettings
 
     /// <summary>The most objects one level holds when a script makes them (objects.md 5.1, a guess that protects the server from a loop); objects read from a file are not counted against it.</summary>
     public int MaxObjectsPerLevel { get; init; } = 5000;
+
+    /// <summary>The class an item joins for an event is this prefix and the Crossfire name of its type (<see cref="MudTypeName"/>) when that class exists.</summary>
+    public string TypeClassPrefix { get; init; } = "mudtype_";
+
+    /// <summary>The class of an item whose type has no class of its own.</summary>
+    public string GeneralTypeClass { get; init; } = "mudtype_general";
+
+    /// <summary>
+    /// The name the class of an item's type is called by (<c>mudtype_&lt;name&gt;</c>; docs/mud-phase3.md section 4.4): Crossfire's name of
+    /// the type, the name of Graal Kingdoms' class where it has one of its own (a bow is a <c>fireweapon</c>, flesh and drink are food by
+    /// the classes of its faces), rings and amulets are <c>armour</c> (objects.md 3.1), 161 is a <c>housedoor</c>, 162 and 163 a
+    /// <c>tool</c> and 164 to 166 <c>cloth</c>. Null for a type that is named by none (it joins the general class).
+    /// </summary>
+    public static string? MudTypeName(int type) => type switch
+    {
+        Define.WEAPON => "weapon",
+        Define.BOW => "fireweapon",
+        Define.ARMOUR or Define.RING or Define.AMULET => "armour",
+        Define.HELMET => "helmet",
+        Define.SHIELD => "shield",
+        Define.BOOTS => "boots",
+        Define.GLOVES => "gloves",
+        Define.GIRDLE => "girdle",
+        Define.BRACERS => "bracers",
+        Define.CLOAK => "cloak",
+        Define.POTION => "potion",
+        Define.FOOD or Define.DRINK or Define.FLESH => "food",
+        Define.POISON => "poison",
+        Define.CONTAINER => "container",
+        Define.SIGN => "sign",
+        Define.BOOK => "book",
+        Define.SCROLL => "scroll",
+        Define.SKILLSCROLL => "skillscroll",
+        Define.SKILL => "skill",
+        Define.TREASURE => "treasure",
+        Define.LIGHTER => "lighter",
+        Define.TRIGGER => "trigger",
+        Define.CF_HANDLE => "cfhandle",
+        Define.POWER_CRYSTAL => "powercrystal",
+        Define.ARMOUR_IMPROVER => "armourimprover",
+        Define.WEAPON_IMPROVER => "weaponimprover",
+        161 => "housedoor",
+        ItemStrings.TypeTool or ItemStrings.TypeTool2 => "tool",
+        ItemStrings.TypeMask or ItemStrings.TypeLegs or ItemStrings.TypeBody => "cloth",
+        _ => null,
+    };
 }
 
 /// <summary>
@@ -88,6 +134,15 @@ internal sealed class GkClasses
 
     /// <summary>True when the world has a class of that name (names compare without regard to case).</summary>
     public bool Exists(string name) => names.ContainsKey(name);
+
+    /// <summary>
+    /// The class an item of the type <paramref name="type"/> joins for its events (<c>onApply</c>): <c>mudtype_&lt;name&gt;</c> when the
+    /// world has that class, else the general class (<see cref="GkSettings.MudTypeName"/>).
+    /// </summary>
+    public string MudTypeClass(int type) =>
+        GkSettings.MudTypeName(type) is { } name && names.TryGetValue(settings.TypeClassPrefix + name, out string? found)
+            ? found
+            : names.TryGetValue(settings.GeneralTypeClass, out string? general) ? general : settings.GeneralTypeClass;
 
     /// <summary>The classes an object joins when the host shows it (one name; the host skips a class it does not have).</summary>
     public List<string> For(CfObject ob)

@@ -979,7 +979,7 @@ text changed (above).
 | `FixPlayer.Fix(world, op)` | `fix_player(op)` | recomputes everything above from the applied items. `GkHost.FixPlayer` (the hook of every insert and remove) calls it |
 | `LivingChange.ChangeAbil(world, op, item)` | `change_abil(op, item)` | call it **after** `FLAG_APPLIED` of `item` is set (apply: flag 1) or cleared (take off: -1), and after `SkillTable.CheckSkillToApply`. It takes the attack types and paths of a removed item away, runs `Fix`, touches the controller (so the strings follow at the end of the request) and tells the player what changed through `Host.DrawInfo` (so the event `onRPGMessage`, or `client.text`); it returns 1 when anything changed. It does not call `esrv_update_item` for the item: `apply_special` does. A potion changes `Player.OrigStats` and the account's `mudorigstats` line |
 | `SkillTable.CheckSkillToApply(world, who, item)` | `check_skill_to_apply` | readies the skill of a weapon, bow, potion, scroll, rod, wand or horn and sets `Player.ShootType`; 1 on success, 0 otherwise (with "You can't use that!" and the flag cleared) |
-| `SkillTable.ChangeSkill(world, who, skill)` | `change_skill` | calls `SkillTable.ApplySpecial(who, item, AP_APPLY or AP_UNAPPLY)`, which **wave 6B sets** when it ports `apply_special` (return 0 for done, 1 for not done); until it is set a skill that is not the chosen one cannot be readied, and the log says so |
+| `SkillTable.ChangeSkill(world, who, skill)` | `change_skill` | calls `SkillTable.ApplySpecial(who, item, AP_APPLY or AP_UNAPPLY)`, which lane 6B sets (`InitWave6B`) with its port of `apply_special` (return 0 for done, 1 for not done); until it is set a skill that is not the chosen one cannot be readied, and the log says so |
 | `LivingChange.AddStatbonus(op)`, `RemoveStatbonus(op)`, `AllowedClass(op)`, `ChangeAttr(stats, attr, value)` | `add_statbonus`, `remove_statbonus`, `allowed_class`, `change_attr_value` | the player archetype's stat bonus into the stats and the rolled stats (and out again) |
 
 `change_abil` is ported with its messages (without the colour flag `NDI_BLUE` of the resistance lines: `DrawInfo` has no colours). The
@@ -1201,3 +1201,42 @@ Money is the coins of a player's tree; examine is the text of C's `examine`. The
   `stats` as `examine_lines`.
 - `command_examine` is ported but no script calls it yet (`mudcommand`, wave 7); the ground of its parameterless form is the objects
   below the player, of which this extension's player has none.
+
+## Apply and wearing (lane 6B of wave 6; docs/mud-phase3.md section 4.4)
+
+The code is `Gk/Apply.cs` (`apply_special`, `manual_apply`, `player_apply`, `check_weapon_power` of server/apply.c), `Gk/ApplyCommand.cs`
+(`command_apply`, `player_apply_below`) and, for the script's side, `Dispatcher.Wave6B.cs`; porting.md lists what is not ported and
+differences.md ("Apply and wearing") says where the extension differs. The ids are the lane's (functions 9100, methods 9000 and 9500).
+
+| Function | Id | Parameters | Returns | What it does |
+| --- | --- | --- | --- | --- |
+| `mudapplyinvobject` | 9100 | `int` | `bool` | a slow function: `ctx.player` applies the item of his own tree with that id (deep: also from a sack). The player event `onApplyItem(item)` first, then `player_apply`, which sends the item event `onApply` (below); true when `manual_apply` answered 1. False for an id that is no item of his tree; busy before anything changes |
+
+| Method | Id | Parameters | Returns | What it does |
+| --- | --- | --- | --- | --- |
+| `apply` | 9000 | none | `bool` | a method of `TMudObject`: the same as `mudapplyinvobject` for the item that is the receiver (an item of the actor's own tree) or an object on a level the actor applies; false for an item of another tree. Busy first |
+| `mudapplyobject` | 9001 | none | `bool` | the same method under GK's name for an object of a level |
+| `defaultApply` | 9002 | `handle:TMudPlayer` | `int` | `manual_apply`'s switch without the script's hook for the player the argument is (the request's player for none): wields, wears, readies, or asks the lane that owns the type (`Dispatcher.ApplyByLane`); the answer is `manual_apply`'s 0, 1 or 2, with the lines `player_apply` says for 0 and 2. This is what the fallback of `onApply` invokes. Busy first |
+| `applyinvobject` | 9500 | `int` | `bool` | a method of `TMudPlayer`: `mudapplyinvobject` for the receiver |
+| `getwieldedobject` | 9501 | none | `handle:TMudObject` | the item the player has applied as his weapon (`current_weapon`: a weapon, a tool), nil for bare hands |
+
+| Event | Target | Mode | Parameters | When |
+| --- | --- | --- | --- | --- |
+| `onApplyItem` | player | sync | `handle:TMudObject` | at the start of `mudapplyinvobject` and its kin, with the item, always (also for an item the apply refuses) |
+| `onApply` | item | sync | `handle:TMudPlayer` | from `manual_apply` (after its checks for unpaid objects): on the item's proxy, `classes` the one class of its type (`mudtype_<name>`, else `mudtype_general`), `args` the player, `fallback` the invoke of `defaultApply` with the player. Not sent on a link of 1.0, for an object on the ground, and for `apply -a` and `apply -u` |
+| `onWeaponWielded`, `onWeaponUnWielded` | player | sync | `handle:TMudObject` | after a weapon or a tool is applied or taken off |
+| `onWandReadied`, `onWandUnReadied` | player | sync | `handle:TMudObject` | after a wand is readied or taken off |
+| `onArmorWorn`, `onArmorUnWorn` | player | sync | `handle:TMudObject` | after armour, a helmet, shield, boots, gloves, girdle, bracers, cloak, ring or amulet is put on or taken off |
+| `onClothWorn`, `onClothUnWorn` | player | sync | `handle:TMudObject` | after a mask, legs or a body (types 164 to 166) is put on or taken off |
+
+The order of what a script sees for `mudapplyinvobject(id)` on a sword: the event `onApplyItem`, then `onApply` (the host runs the class
+function, or the fallback `defaultApply`); in the request of `defaultApply` the lines of text (`onRPGMessage`), the hook
+`onWeaponWielded`, and in the same reply the strings `mud_wc`, `mud_dam`, `mud_ac` and `mud_speed` and the item's own string
+(`apply_special` runs `fix_player`, and `change_abil` touches the controller, so the flush writes them at the end of the request).
+
+**Setup.** `InitWave6B` sets `Dispatcher.ApplySpecialUnapply` (lane 5A's `drop_object`: an applied object is unapplied with
+`AP_UNAPPLY | AP_NO_MERGE` before it is dropped, so its hook is sent and a cursed one cannot be dropped) and `gk.Skills.ApplySpecial`
+(lane 5D's `change_skill` readies a skill through `apply_special`).
+
+**Not available yet.** Scrolls, spell books, skill scrolls, rods, horns, skill tools, the improvers, the clock, the shop menu, the power
+crystal, the save bed and exits answer "That is not available yet." and are not used up; levers and handles do nothing (porting.md).
