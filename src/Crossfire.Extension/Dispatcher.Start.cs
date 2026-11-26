@@ -102,35 +102,26 @@ internal sealed partial class Dispatcher
 
     // ------------------------------------------------------------------ the player's items and strings
 
-    // a freed item has no handle any more (the tags of items are lane 4C's: the object is the key, as for the events)
-    private void KillItemHandles(CfObject item)
-    {
-        handles.Kill(item);
-        for (CfObject? c = item.Inv; c != null; c = c.Below)
-        {
-            KillItemHandles(c);
-        }
-    }
-
-    // takes an item out of the player's tree and frees it: its handle dies and its string goes at the next flush
+    // takes an item out of the player's tree and frees it: its tag and the tags of what it holds die now (docs/mud-phase3.md section
+    // 4.2), and the next flush looks at the whole window and deletes the strings of what left
     private void DropItem(PlayerState ps, CfObject item)
     {
-        uint tag = item.Count;
-        KillItemHandles(item);
+        ReleaseItemTags(item);
+        KillItem(item);
+        ps.Contr?.Tracked.Remove(item);
         world!.RemoveOb(item);
-        ps.Contr?.Shown.MarkRemoved(tag);
         world.FreeObject(item);
+        AskForWholeWindow(ps);
     }
 
-    // every item of the top level is to be sent at the next flush (a new tree, or a changed one)
-    private static void MarkItemsDirty(PlayerState ps)
+    // the whole window of the player is to be looked at at the next flush (a new tree, or a changed one): lane 4C's reconcile
+    // compares every string with what the client holds, the tags are the proxies' (Dispatcher.ItemProxy)
+    private static void AskForWholeWindow(PlayerState ps)
     {
-        if (ps.Contr is { } contr)
+        if (ps.Contr is Player contr)
         {
-            for (CfObject? c = ps.Ob.Inv; c != null; c = c.Below)
-            {
-                contr.Shown.MarkDirty(c.Count);
-            }
+            contr.Reconcile = true;
+            contr.Touch();
         }
     }
 
@@ -281,7 +272,7 @@ internal sealed partial class Dispatcher
 
         string cls = className.EndsWith("_class", StringComparison.Ordinal) && className.Length > 6 ? className.Substring(0, className.Length - 6) : className;
         (pl.Extra ??= new ExtraKeys()).Set("mudclass", cls);
-        MarkItemsDirty(ps);
+        AskForWholeWindow(ps);
         ps.Dirty = true;
         RefreshClientStrings(ps);
         return Outcome.Ok(Val.True);
@@ -382,11 +373,7 @@ internal sealed partial class Dispatcher
         DeleteClientStrings(ps);
         CfObject old = ps.Ob;
         DetachController(ps);
-        for (CfObject? c = old.Inv; c != null; c = c.Below)
-        {
-            KillItemHandles(c);
-        }
-        FreeCfObject(old);
+        FreeCfObject(old); // the tags of its items die with it
         ps.Ob = fresh;
         ps.FileKey = key;
         ps.Loaded = loaded;
@@ -395,7 +382,7 @@ internal sealed partial class Dispatcher
         if (ps.Contr is { } contr)
         {
             contr.NeedsResend = true;
-            MarkItemsDirty(ps);
+            AskForWholeWindow(ps);
             contr.Touch();
         }
     }

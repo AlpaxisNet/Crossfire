@@ -205,9 +205,11 @@ public sealed class StartPathTests : IDisposable
         ReplyFrame r = Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
 
         // Assert
-        var marked = ext.Dispatcher.ControllerOf("bob")!.Shown.Dirty;
-        Assert.Equal(Items(pl).Select(i => i.Count).OrderBy(c => c), marked.OrderBy(c => c));
-        Assert.NotEmpty(marked);
+        // the strings of the items are in the reply of the same request (the tags are the proxies', as the flush of lane 4C keeps them)
+        var sent = Effects(r, "client.set").Select(e => e.Get("name")!.AsString).Where(n => n.StartsWith("clientr.mud_item", StringComparison.Ordinal)).ToList();
+        var shown = Items(pl).Where(i => i.Invisible == 0).ToList();
+        Assert.NotEmpty(shown);
+        Assert.Equal(shown.Select(i => "clientr.mud_item" + ext.Dispatcher.HandlesOfTests.TagOf(ext.Dispatcher.ItemProxy(i))).OrderBy(n => n, StringComparer.Ordinal), sent.OrderBy(n => n, StringComparer.Ordinal));
         Assert.NotNull(login);
         Assert.Equal(0UL, r.Status);
     }
@@ -221,9 +223,8 @@ public sealed class StartPathTests : IDisposable
         Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
         CfObject pl = Ob(ext);
         CfObject oldSword = Items(pl).First(i => i.Arch!.Name == "sword");
-        uint oldTag = oldSword.Count;
-        ext.Dispatcher.HandlesOfTests.HandleOf(oldSword);
-        ext.Dispatcher.ControllerOf("bob")!.Shown.ClearMarks();
+        LevelObject oldProxy = ext.Dispatcher.ItemProxy(oldSword);
+        string oldName = "clientr.mud_item" + ext.Dispatcher.HandlesOfTests.TagOf(oldProxy);
 
         // Act
         ReplyFrame r = Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("thief_class"));
@@ -231,8 +232,8 @@ public sealed class StartPathTests : IDisposable
         // Assert
         Assert.True(r.Result.AsBool);
         Assert.Equal(new[] { "experience_agility", "experience_magic", "experience_mental", "experience_personality", "experience_physique", "experience_wis", "skill_stealing", "sword", "thief_class" }, ArchNames(pl));
-        Assert.False(ext.Dispatcher.HandlesOfTests.Has(oldSword));
-        Assert.Contains(oldTag, ext.Dispatcher.ControllerOf("bob")!.Shown.Removed);
+        Assert.False(ext.Dispatcher.HandlesOfTests.Has(oldProxy));
+        Assert.Contains(oldName, Effects(r, "client.del").Select(e => e.Get("name")!.AsString));
         Assert.Equal("thief", Ob(ext).Extra!.Get("mudclass"));
     }
 
@@ -507,11 +508,10 @@ public sealed class StartPathTests : IDisposable
         Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
         CfObject pl = Ob(ext);
         List<CfObject> before = Items(pl);
-        uint[] tags = before.Select(i => i.Count).ToArray();
-        foreach (CfObject i in before)
-        {
-            ext.Dispatcher.HandlesOfTests.HandleOf(i);
-        }
+        List<LevelObject> proxies = before.Select(i => ext.Dispatcher.ItemProxy(i)).ToList();
+        // the strings of the visible items are with the client; the others never had one
+        string[] names = before.Zip(proxies).Where(x => x.First.Invisible == 0).Select(x => "clientr.mud_item" + ext.Dispatcher.HandlesOfTests.TagOf(x.Second)).ToArray();
+        Assert.NotEmpty(names);
         pl.Stats.Exp = 5000;
         pl.Stats.Food = 100;
         pl.Level = 4;
@@ -523,8 +523,9 @@ public sealed class StartPathTests : IDisposable
         // Assert
         Assert.Equal(0UL, r.Status);
         Assert.Null(pl.Inv);
-        Assert.All(before, i => Assert.False(ext.Dispatcher.HandlesOfTests.Has(i)));
-        Assert.Equal(tags.OrderBy(t => t), ext.Dispatcher.ControllerOf("bob")!.Shown.Removed.OrderBy(t => t));
+        Assert.All(proxies, p => Assert.False(ext.Dispatcher.HandlesOfTests.Has(p)));
+        var deleted = Effects(r, "client.del").Select(e => e.Get("name")!.AsString).ToList();
+        Assert.All(names, n => Assert.Contains(n, deleted));
         Assert.Equal(0L, Get(ext, h, Ply("mudexp")).AsInt);
         Assert.Equal(1L, Get(ext, h, Ply("mudlevel")).AsInt);
         Assert.Equal(999L, Get(ext, h, Ply("mudfood")).AsInt);
@@ -675,7 +676,7 @@ public sealed class StartPathTests : IDisposable
         Assert.Equal(saved, File.ReadAllBytes(AccountFile(world)));
     }
 
-    private static void Item(DirectExt ext, CfObject pl) => ext.Dispatcher.HandlesOfTests.HandleOf(Items(pl).First());
+    private static void Item(DirectExt ext, CfObject pl) => ext.Dispatcher.ItemProxy(Items(pl).First());
 
     [Fact]
     public void UnloadMudAccount_Given_a_loaded_account_When_unloaded_Then_the_player_is_blank_its_old_items_have_no_handles_and_the_handle_of_the_player_lives()
@@ -686,7 +687,7 @@ public sealed class StartPathTests : IDisposable
         Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
         CfObject old = Ob(ext);
         CfObject first = Items(old).First();
-        ext.Dispatcher.HandlesOfTests.HandleOf(first);
+        LevelObject firstProxy = ext.Dispatcher.ItemProxy(first);
 
         // Act
         Method(ext, h, TMudPlayerMembers.MethodUnloadMudAccount);
@@ -695,7 +696,7 @@ public sealed class StartPathTests : IDisposable
         CfObject now = Ob(ext);
         Assert.NotSame(old, now);
         Assert.Null(now.Inv);
-        Assert.False(ext.Dispatcher.HandlesOfTests.Has(first));
+        Assert.False(ext.Dispatcher.HandlesOfTests.Has(firstProxy));
         Assert.Equal("bob", Get(ext, h, Ply("mudrealname")).AsString);
         Assert.NotNull(ext.Dispatcher.ControllerOf("bob"));
     }
@@ -731,7 +732,28 @@ public sealed class StartPathTests : IDisposable
         Assert.Equal(h, ev.Get("args")!.Items.Single().AsHandle);
         Assert.Equal("warrior", Get(ext, h, Ply("mudclass")).AsString);
         Assert.Equal(new[] { true }, resendAtFlush); // the part that sends item strings is told to send them all
-        Assert.Equal(Items(Ob(ext)).Select(i => i.Count).OrderBy(c => c), ext.Dispatcher.ControllerOf("bob")!.Shown.Dirty.OrderBy(c => c));
+    }
+
+    [Fact]
+    public void LoadMudAccount_Given_an_unloaded_account_When_loaded_Then_the_strings_of_its_items_are_in_the_reply()
+    {
+        // Arrange
+        var options = new ExtensionOptions { Writer = new FileWriterOptions { Quiet = TimeSpan.FromMilliseconds(20), MaxDelay = TimeSpan.FromMilliseconds(100) } };
+        using DirectExt ext = StartWorld.Start(world, options);
+        ulong h = Hello(ext);
+        Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
+        Method(ext, h, TMudPlayerMembers.MethodSaveMudAccount);
+        WaitForFile(AccountFile(world));
+        Method(ext, h, TMudPlayerMembers.MethodUnloadMudAccount);
+
+        // Act
+        ReplyFrame r = Method(ext, h, TMudPlayerMembers.MethodLoadMudAccount, args: S(""));
+
+        // Assert
+        var sent = Effects(r, "client.set").Select(e => e.Get("name")!.AsString).Where(n => n.StartsWith("clientr.mud_item", StringComparison.Ordinal)).ToList();
+        var shown = Items(Ob(ext)).Where(i => i.Invisible == 0).ToList();
+        Assert.NotEmpty(shown);
+        Assert.Equal(shown.Select(i => "clientr.mud_item" + ext.Dispatcher.HandlesOfTests.TagOf(ext.Dispatcher.ItemProxy(i))).OrderBy(n => n, StringComparer.Ordinal), sent.OrderBy(n => n, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -959,7 +981,7 @@ public sealed class StartPathTests : IDisposable
         CfObject pl = Ob(ext);
         CfObject sack = w.InsertObInOb(w.ArchToObject(w.FindArchetype("sack"))!, pl);
         CfObject inner = w.InsertObInOb(w.ArchToObject(w.FindArchetype("trinket"))!, sack);
-        ext.Dispatcher.HandlesOfTests.HandleOf(inner);
+        LevelObject innerProxy = ext.Dispatcher.ItemProxy(inner);
         pl.ChosenSkill = sack;
         pl.ExpObj = sack;
 
@@ -967,7 +989,7 @@ public sealed class StartPathTests : IDisposable
         Method(ext, h, TMudPlayerMembers.MethodMudResetPlayer);
 
         // Assert
-        Assert.False(ext.Dispatcher.HandlesOfTests.Has(inner));
+        Assert.False(ext.Dispatcher.HandlesOfTests.Has(innerProxy));
         Assert.Null(pl.ChosenSkill);
         Assert.Null(pl.ExpObj);
     }
