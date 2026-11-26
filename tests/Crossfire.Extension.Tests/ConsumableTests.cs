@@ -283,22 +283,79 @@ public sealed class ConsumableTests
         Assert.Equal(new[] { line }, f.Host.Lines);
     }
 
+    [Theory]
+    [InlineData("stat")]
+    [InlineData("resist")]
+    [InlineData("cursed")]
+    public void ApplyFood_Given_a_food_that_changes_a_stat_or_protects_When_eaten_Then_the_player_is_told_it_is_not_available_and_nothing_is_used_up(string kind)
+    {
+        // Arrange: a food with a title (or a cursed one) that needs cast_change_attr
+        var f = new Fixture();
+        (CfObject ob, _) = f.Player(hp: 5);
+        CfObject food = f.Give(ob, "apple", o =>
+        {
+            o.Title = "of might";
+            o.Stats.Hp = 7;
+            if (kind == "stat")
+            {
+                o.Stats.Str = 1;
+                o.Stats.Cha = 1;
+            }
+            else if (kind == "resist")
+            {
+                o.Resist[Define.ATNR_FIRE] = 20;
+            }
+            else
+            {
+                o.Title = null;
+                o.SetFlag(Define.FLAG_CURSED);
+                o.Stats.Dex = 1;
+            }
+        }, nrof: 2);
+        bool told = false;
+
+        // Act
+        Consumable.ApplyFood(f.World, ob, food, (_, _, _, _) => told = true);
+
+        // Assert: said once, and the food, the hit points and the stack are as they were
+        Assert.Equal(new[] { Consumable.NotAvailable }, f.Host.Lines);
+        Assert.False(told);
+        Assert.Equal(2u, food.Nrof);
+        Assert.True(Held(ob, food));
+        Assert.Equal(500, ob.Stats.Food);
+        Assert.Equal(5, ob.Stats.Hp);
+    }
+
     [Fact]
-    public void EatSpecialFood_Given_a_food_that_changes_a_stat_or_protects_When_eaten_Then_the_player_is_told_once_that_it_is_not_available()
+    public void NeedsSpell_Given_a_resistance_a_spell_protects_against_or_a_stat_When_asked_Then_it_is_true_and_false_for_the_others()
     {
         // Arrange
         var f = new Fixture();
-        (CfObject ob, _) = f.Player();
-        CfObject food = f.Make("apple");
-        food.Stats.Str = 1;
-        food.Stats.Cha = 1;
-        food.Resist[Define.ATNR_FIRE] = 20;
-
-        // Act
-        Consumable.EatSpecialFood(f.World, ob, food);
+        CfObject plain = f.Make("apple");
+        CfObject fire = f.Make("apple");
+        fire.Resist[Define.ATNR_FIRE] = 1;
+        CfObject acid = f.Make("apple");
+        acid.Resist[Define.ATNR_ACID] = 50;
+        CfObject negative = f.Make("apple");
+        negative.Resist[Define.ATNR_FIRE] = -20;
+        CfObject dex = f.Make("apple");
+        dex.Stats.Dex = 1;
+        CfObject con = f.Make("apple");
+        con.Stats.Con = -1;
+        CfObject cha = f.Make("apple");
+        cha.Stats.Cha = 2;
+        CfObject str = f.Make("apple");
+        str.Stats.Str = 2;
 
         // Assert
-        Assert.Equal(new[] { Consumable.NotAvailable }, f.Host.Lines);
+        Assert.True(Consumable.NeedsSpell(cha));
+        Assert.True(Consumable.NeedsSpell(str));
+        Assert.False(Consumable.NeedsSpell(plain));
+        Assert.True(Consumable.NeedsSpell(fire));
+        Assert.False(Consumable.NeedsSpell(acid));
+        Assert.False(Consumable.NeedsSpell(negative));
+        Assert.True(Consumable.NeedsSpell(dex));
+        Assert.True(Consumable.NeedsSpell(con));
     }
 
     [Fact]

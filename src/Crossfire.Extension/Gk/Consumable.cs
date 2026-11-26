@@ -93,7 +93,13 @@ internal static class Consumable
         }
         else
         {
-            // usual case - no dragon meal
+            // usual case - no dragon meal. Food that changes stats or protects needs cast_change_attr, which is not ported: an apply that
+            // cannot be done uses nothing up (docs/mud-phase3.md section 4.4)
+            if ((!string.IsNullOrEmpty(tmp.Title) || tmp.QueryFlag(Define.FLAG_CURSED)) && NeedsSpell(tmp))
+            {
+                Draw(w, op, NotAvailable);
+                return;
+            }
             if (op.Stats.Food + tmp.Stats.Food > FullStomach)
             {
                 Draw(w, op, tmp.Type == Define.FOOD || tmp.Type == Define.FLESH
@@ -148,29 +154,32 @@ internal static class Consumable
     }
 
     /// <summary>
-    /// apply.c <c>eat_special_food</c>: food that changes the eater's stats or protects him (<c>cast_change_attr</c>, not ported: the
-    /// player is told once that it does not work) and food that changes hit points or spell points (ported, without a limit as in C).
+    /// The first two checks of apply.c <c>eat_special_food</c>: the food modifies the eater's strength, dexterity, constitution or
+    /// charisma, or it protects him against an attack that a spell protects against. C casts <c>cast_change_attr</c> for it, which is not ported.
     /// </summary>
-    public static void EatSpecialFood(CfWorld w, CfObject who, CfObject food)
+    internal static bool NeedsSpell(CfObject food)
     {
-        // check if food modifies stats of the eater (STR, DEX, CON, CHA)
-        bool needsSpell = CfWorld.GetAttrValue(food.Stats, Define.STR) != 0 || CfWorld.GetAttrValue(food.Stats, Define.DEX) != 0
-            || CfWorld.GetAttrValue(food.Stats, Define.CON) != 0 || CfWorld.GetAttrValue(food.Stats, Define.CHA) != 0;
-
-        // check if we can protect the eater
+        if (CfWorld.GetAttrValue(food.Stats, Define.STR) != 0 || CfWorld.GetAttrValue(food.Stats, Define.DEX) != 0
+            || CfWorld.GetAttrValue(food.Stats, Define.CON) != 0 || CfWorld.GetAttrValue(food.Stats, Define.CHA) != 0)
+        {
+            return true;
+        }
         for (int i = 0; i < Define.NROFATTACKS; i++)
         {
             if (food.Resist[i] > 0 && Protectable[i])
             {
-                needsSpell = true;
+                return true;
             }
         }
+        return false;
+    }
 
-        if (needsSpell)
-        {
-            Draw(w, who, NotAvailable);
-        }
-
+    /// <summary>
+    /// apply.c <c>eat_special_food</c>: food that changes hit points or spell points (ported, without a limit as in C). Food that
+    /// changes the eater's stats or protects him (<c>cast_change_attr</c>, not ported) is refused by <see cref="ApplyFood"/> before.
+    /// </summary>
+    public static void EatSpecialFood(CfWorld w, CfObject who, CfObject food)
+    {
         // check for hp, sp change
         if (food.Stats.Hp != 0)
         {

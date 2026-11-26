@@ -393,8 +393,9 @@ C's arithmetic (golden values: `tests/Crossfire.Extension.Tests/golden/consumabl
   archetypes would be eaten for nothing). C has already identified the potion by then, so it is identified. `apply_potion` still
   returns 1 (manual_apply's value).
 - **Food that changes stats or protects** (`eat_special_food`'s `cast_change_attr`: strength, dexterity, constitution, charisma and the
-  twelve resistances that have a protection spell) says "That is not available yet." once; the food is eaten, its food level and its
-  hit and spell points are applied as in C (it is not a potion: C's other effects of it are exact).
+  twelve resistances that have a protection spell) says "That is not available yet." and is **not eaten**: nothing changes, the stack
+  stays, no `onEatFood` is sent (docs/mud-phase3.md 4.4: an apply that cannot be done uses nothing up). The hit and spell points of the
+  other special food are applied as in C.
 - **`hit_player(..., AT_POISON)` does no damage.** In C an attack of type poison has `dam = 0` after the roll for the effect (the type is an
   effect, `hit_player_attacktype`), so a poisonous drink and a cursed food lose no hit points; what C does is `poison_player` (a
   `poisoning` force that the tick works on), which is left out with the rest of the tick. The line of text and the loss of a quarter of
