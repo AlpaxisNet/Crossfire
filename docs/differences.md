@@ -258,3 +258,24 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
   a drop into an open container does nothing until `Dispatcher.PutObjectInSack` is set.
 - **The square of `command_take`** is the level's objects whose tile is the player's (the position from the query `player.pos`),
   the one placed last first; C's chain `op->below`. An object that no `level.load` has shown to the host yet is not on the square.
+## The inventory functions (`Gk/Inventory.cs`, `Dispatcher.Wave5B.cs`; lane 5B of phase 3)
+
+Choices of Alpaxis where Graal Kingdoms' functions have no original in Crossfire (the names are in `docs/extension.md`, "The inventory
+functions").
+
+- **Field [0] of an item string has no comma.** A comma in a name (Graal Kingdoms has an archetype `Evil Master, Bonehead`, and scripts set
+  `mudrealname`) would shift the seven comma fields; `ItemStrings.DisplayName` writes it as a semicolon, in the item string and in the
+  names `mudlistweapons` and its kin write, which the Item-Menu compares.
+- **An object without `nrof` counts one** in `countinvobject`, `mudcountinvobject` and the removals (C's `pick_up_object` does the same:
+  `tmp_nrof`); the add sets `nrof` to the count, also for a count of 1.
+- **Remove is all or nothing**, from the stacks of the archetype at the top level in the order of the inventory; an absent item is false and
+  says nothing (the login hook asks for a flag that most players do not have).
+- **`findinvobjectbytitle`** (the original is not known): the first visible object whose `title` is the text, else the first whose
+  "name title" is, letters in any case.
+- **`mudskilllevel`** is the level of the skill's experience object (C's `show_skills` calls it the one that is always right), else the
+  skill's own level; `mudhaveskill` and it match the skill name in any case.
+- **The lists of the quick menu** write `<name>,<icon>` entries and an empty end marker with `caller.setprop`, in the order of the
+  inventory. What is a weapon (types 15, 14, 162, 163) and what is equipment (applied) is Alpaxis's reading: the original's lists are not
+  known. `mudlistspells` writes the spell paths and no spell, because the port has no spell table (a player's spells are numbers).
+- **`mudresetinvobject`** is `copy_object` of the archetype's clone over the item: the extra lines (`mudowner`, `mudrealname`) are gone;
+  count, identified and applied state are kept. `mudorderinventory` is a relinking of the inventory, saved with the account.

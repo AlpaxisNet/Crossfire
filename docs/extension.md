@@ -363,6 +363,19 @@ With Graal Kingdoms' own world, three tests (skipped without the variables) repo
 | `mudaddspecialobject` | 67 | `float`, `float`, `int`, `string`, `string` | `handle:TMudObject` | objects.md F2: the first word of the fourth argument is the archetype, the rest its `slaying`; the fifth its `msg`; the third its `value` |
 | `mudresetplayer` | 2000 | none | `void` | lane 4D (the start path, below): the player of the request's context starts again; the same as the method of `TMudPlayer` |
 | `mudrollstats` | 2001 | none | `void` | lane 4D: the player of the request's context rolls its stats again; the same as the method `rollstats` |
+| `mudaddinvobject` | 5000 | `int`, `string` | `bool` | lane 5B (the inventory functions, below): the player of the request's context gets that many objects of the archetype; slow |
+| `mudremoveinvobject` | 5001 | `int`, `string` | `bool` | lane 5B: that many objects of the archetype leave the player's top level, all or none; slow |
+| `mudcountinvobject` | 5002 | `string`, `bool` | `int` | lane 5B: the objects of an archetype the player holds, the sacks too with the flag |
+| `mudfindinvobject` | 5003 | `string` | `int` | lane 5B: the id of the best match of the player's top level (`find_best_object_match`), -1 when none |
+| `mudresetinvobject` | 5004 | `int` | `bool` | lane 5B: the item of that id goes back to what its archetype is; slow |
+| `mudorderinventory` | 5005 | `any` | `void` | lane 5B: the items of a list of ids come first in the inventory, in that order |
+| `findMudObject` | 5006 | `int` | `handle:TMudObject` | lane 5B: the item of that id in the player's tree (the sacks too), nil when none |
+| `mudhaveskill` | 5007 | `string` | `bool` | lane 5B: the player has a skill (type 43) of that name |
+| `mudskilllevel` | 5008 | `string` | `int` | lane 5B: the level of that skill, 0 when he has none |
+| `mudlistweapons` | 5009 | none | `void` | lane 5B, 1.1 only: writes `this.weapon<i>` of the calling NPC (`caller.setprop`) |
+| `mudlistskills` | 5010 | none | `void` | lane 5B, 1.1 only: `this.skill<i>` |
+| `mudlistspells` | 5011 | none | `void` | lane 5B, 1.1 only: `this.spellpaths` and the end marker `this.spell0` |
+| `mudlistequipment` | 5012 | none | `void` | lane 5B, 1.1 only: `this.equipment<i>` |
 
 Three types: `TMudArch` (id 1, host `object`, no methods), whose members are all read-only (`access` "r") and **stable**: an
 archetype never changes; `TMudObject` (id 2, host `npc`) and `TMudPlayer` (id 3, host `player`), below. Three events (below), no
@@ -593,7 +606,7 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `cloneMudObject` | 300 | `float`, `float` | `handle:TMudObject` | objects.md F6 (EVIDENCED, 8 calls): a copy at (x, y) of the same level with the mud state, not the script variables |
 | `destroymudobject` | 301 | none | `void` | objects.md F5 (EVIDENCED, 38 calls): the object leaves the level, `npc.remove`, no `onMudDestroy` |
 
-Not here, because they need the rules of phases 3 and 4: `muddecreasequantity`, `mudvalue`, `getresistance`, `setresistance`, `apply`,
+Not here, because they need the rules of phases 3 and 4 (`muddecreasequantity` is lane 5B's, below): `mudvalue`, `getresistance`, `setresistance`, `apply`,
 `examine`, `mudidentify`, the attack methods; the members `mudowner`, `muditems`, `mudenvironment`, `mudmoney`, `datablock`,
 `dontmuddestroy` (a script flag), the resistances by name.
 
@@ -996,4 +1009,72 @@ then `DropPlaceAt`); a failed query is the request's answer, nothing changed. `t
 open, and `Dispatcher.ApplySpecialUnapply` (`Func<op, tmp, int>`, zero for unapplied) what `drop_object` calls for an applied object;
 wave 6 sets both (until then nothing is dropped into a container and an applied object stays). `Pickup.SackCanHold` is the port of
 `sack_can_hold` for `put_object_in_sack`. A pick up into a container uses `Pickup.PickUp`'s search for an applied container.
+## The inventory functions (lane 5B)
+
+Docs/mud-phase3.md section 4.2 of the suite is the specification; the code is `Dispatcher.Wave5B.cs`, `Gk/Inventory.cs` (the C: the weight
+test of `pick_up_object`, `present_arch_in_ob`, the level of a skill's experience object), `Gk/Manifest.Wave5B.cs` (the functions above, ids
+5000 to 5012) and `Gk/TMudObjectMembers.Wave5B.cs` (the methods below); the tests are `InventoryTests.cs`.
+
+**Who the actor is.** A function acts on the player of the request's context; a method on its receiver. An id (a tag) a script gives is
+looked up in that player's own tree (`Dispatcher.FindItemById`): another player's item, an object of a level, a dead tag and 0 are
+unknown ids, which answer nil, false, 0 or -1 and change and show nothing. A request with no logged-in player in its context gets the answer
+of a miss (the lists write only their end marker). An account that is not loaded (`Loaded` false) is not changed. The calls with a
+wrong number or kind of arguments are `bad_args`.
+
+**Methods of `TMudPlayer`** (ids 5500 to 5508, `Gk/TMudObjectMembers.Wave5B.cs`): what changes a tree asks `CheckBusy()` first and answers
+`busy` before anything changes.
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `addinvobject` | 5500 | `int`, `string` | `handle:TMudObject` | `arch_to_object` through `NewItem` (identified), `nrof` = the count, the weight test of `pick_up_object` (his weight and what he carries plus the new weight against `weight_limit[Str]`), `insert_ob_in_ob` (it merges into a stack that `can_merge` accepts, which is the result). Nil, and the text "That item is too heavy for you to put it in your inventory." as `onRPGMessage`, when it is too heavy; nil for an unknown archetype, a count below 1 or above 100,000,000 |
+| `addinvobject2` | 5501 | `int`, `string` | `handle:TMudObject` | the same without the weight test (only a weight the object model cannot add up is refused) |
+| `removeinvobject` | 5502 | `int`, `string` | `bool` | the count of the archetype leaves the top level, taken from its stacks in the order of the inventory: all or nothing, false and no text when he has fewer or none; a stack that is taken whole is freed and its tag dies, a cut stack (`decrease_ob_nr`) writes its string again; an applied weapon that goes is no longer his current weapon, nor his mark |
+| `removeinvobjectbyid` | 5503 | `int`, `int` | `bool` | count, id: that item (the sacks too) loses that many, false when it has fewer |
+| `removeinvobjects` | 5504 | `string` | `int` | every stack of the archetype at the top level goes; the number of objects that went (0 for an unknown archetype) |
+| `findinvobject` | 5505 | `string`, `bool` | `handle:TMudObject` | `find_best_object_match` (`ItemMatching`) of the top level, and with the flag of the sacks too, the top level first; nil for a miss and for an empty text |
+| `findinvobjectbyid` | 5506 | `int`, `bool` | `handle:TMudObject` | `FindItemById`: the top level and the open container, with the flag all the sacks |
+| `findinvobjectbytitle` | 5507 | `string`, `bool` | `handle:TMudObject` | the first visible object whose `title` is the text (letters in any case), else the first whose "name title" is; with the flag the sacks too (Alpaxis's rule, differences.md) |
+| `countinvobject` | 5508 | `string`, `bool` | `int` | the sum of `nrof` (an object without `nrof` is one) of the objects made from the archetype; with the flag the sacks too |
+
+**Methods of `TMudObject`** (ids 5000 to 5004, for a container or a monster that holds objects; an item's proxy is the usual receiver):
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `findinvobject` | 5000 | `string`, `bool` | `handle:TMudObject` | as the player's, in the receiver's own inventory |
+| `findinvobjectbyid` | 5001 | `int`, `bool` | `handle:TMudObject` | the id is looked up in the request's player's tree, and the receiver must hold what is found (one level down, or any depth with the flag) |
+| `findinvobjectbytitle` | 5002 | `string`, `bool` | `handle:TMudObject` | as the player's |
+| `countinvobject` | 5003 | `string`, `bool` | `int` | as the player's |
+| `muddecreasequantity` | 5004 | `int` | `void` | `decrease_ob_nr` for n above 0 (the object is gone when n reaches its count: the tag dies and the string is deleted; in a player's tree the account is dirty), the stack grows by -n for n below 0 (its weight added to what holds it, the client told), 0 does nothing; on an object of a level the count changes, `onUpdateObject` is queued and the level is dirty, and at zero the object is destroyed with `npc.remove` |
+
+**The functions.** `mudremoveinvobject` and `mudaddinvobject` are the methods above for the request's player and answer true or false.
+`mudcountinvobject(text, deep)` and `mudfindinvobject(text)` (the id of the best match of the top level, -1 for a miss) are the same
+searches. `mudresetinvobject(id)` takes the item out of its holder, copies its archetype's clone over it (`copy_object`: every field,
+and the extra lines such as `mudowner` and `mudrealname` go), keeps its count, identified and applied state, and puts it back, where it
+may merge into an equal stack (its handle is then dead); true, or false for an unknown id. `mudorderinventory(ids)` links the items
+named by a list of ids (top level of the player's own tree, once each, unknown ids skipped) at the head of the inventory in that order.
+`findMudObject(id)` is `findinvobjectbyid(id, true)` of the request's player. `mudhaveskill(name)` and `mudskilllevel(name)` look for the
+skill object (type 43) of that name in the top level of the player's tree (letters in any case); the level is that of the skill's
+experience object when it has one (C's `show_skills` says the skill object's own level is not always right), else its own `level`.
+`mudaddinvobject`, `mudremoveinvobject` and `mudresetinvobject` are `slow` in the manifest and answer `busy` before anything changes.
+
+**The lists of the quick menu** (`mudlistweapons`, `mudlistskills`, `mudlistspells`, `mudlistequipment`) write numbered strings into the
+script that called them with the effect `caller.setprop` (`this.weapon0`, `this.weapon1`, ... and then the empty `this.weapon<n>`, which the
+quick menu's loop stops at). They are in the manifest of a 1.1 link only: on a 1.0 link, which has no such effect, the functions do not exist
+and a call is `unknown_op`. An entry is `<name>,<icon>`: the name is `ItemStrings.DisplayName`, the same text as field [0] of the item string
+(a comma in a name is a semicolon in both), so that the Item-Menu's `equipweapon`, which compares field [0] with the name it was given,
+finds the item (a test pins that every weapon of a loaded account is listed under its field [0]); the icon is `mud_<face>.png`. Weapons are
+the visible objects of types 15, 14, 162 and 163; equipment the applied visible objects; skills the type-43 objects. `mudlistspells` writes
+`this.spellpaths` (the 20 names of `spellpathnames`) and no spell, as the port has no spell table.
+
+**Mutants tried against `InventoryTests.cs`** (each broken, a named test failed, restored): count 0 accepted, the weight test without
+`carrying`, `addinvobject2` testing the weight, no text when too heavy, a new object not identified, remove not all or nothing, a removed
+weapon staying current, a whole stack not freed, `removeinvobjectbyid` ignoring the stack size or not looking in sacks, an object without
+`nrof` counting 0, `countinvobject` always deep, the deep find without sacks, the title without "name title", a container that holds
+everything, the skill's own level instead of its experience object's, a case-sensitive skill name, bows not weapons, a comma left in
+field [0], no end marker, a relink without `Above`, a reset that loses the count or the applied state, an increase without weight, a
+level object that does not queue `onUpdateObject`, a method without `CheckBusy`, a function not `slow`, a miss of `mudfindinvobject`
+answering 0, lists on a 1.0 link, an order that takes items out of a sack (the test host crashes on the cyclic chain), a cut stack not
+through `decrease_ob_nr`, `removeinvobjects` stopping after one stack, a decrease to zero that keeps the object, `mudhaveskill` false,
+the spell paths one short, the equipment list not filtered. Not caught, and equivalent: leaving out `ps.Dirty = true` after an add (the
+object model's hooks mark the account dirty as well).
 
