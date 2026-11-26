@@ -51,4 +51,13 @@ public static partial class Define
 
     /// <summary>map.h MAP_STYLE: the map is a random map style (loader.l speed).</summary>
     public const int MAP_STYLE = 0x8;
+
+    /// <summary>map.h MAP_FLUSH.</summary>
+    public const int MAP_FLUSH = 0x1;
+    /// <summary>map.h MAP_PLAYER_UNIQUE: the map file is one a player's unique items were saved in (no name changes, no original flag).</summary>
+    public const int MAP_PLAYER_UNIQUE = 0x2;
+    /// <summary>map.h MAP_BLOCK.</summary>
+    public const int MAP_BLOCK = 0x4;
+    /// <summary>map.h MAP_OVERLAY: the file is an overlay of a map.</summary>
+    public const int MAP_OVERLAY = 0x10;
 }

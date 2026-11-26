@@ -136,6 +136,28 @@ public class FileWriterTests
     }
 
     [Fact]
+    public void IsIdle_Given_a_pending_file_When_asked_Then_false_and_no_write_is_forced_and_true_after_the_write()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        FileWriter writer = Make(folder, new FileWriterOptions { Quiet = TimeSpan.FromHours(1), MaxDelay = TimeSpan.FromHours(1) });
+        Assert.True(writer.IsIdle());
+        writer.Submit("a.txt", Bytes("x"));
+
+        // Act
+        bool idle = writer.IsIdle();
+        Thread.Sleep(200);
+        bool written = File.Exists(Path.Combine(folder.Path, "a.txt"));
+        writer.Kick();
+
+        // Assert
+        Assert.False(idle);
+        Assert.False(written);
+        Assert.True(WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")) && writer.IsIdle()));
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
     public void WaitWritten_Given_nothing_submitted_When_waited_Then_true_at_once()
     {
         // Arrange
@@ -527,6 +549,197 @@ public class FileWriterTests
         Assert.Equal(3L, counters.WriterFailures); // not tried a fourth time
         Assert.False(waited);
         Assert.Contains(logs, l => l.Contains("given up"));
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public void Run_Given_a_file_that_keeps_failing_When_another_file_is_submitted_Then_the_other_is_written_at_its_quiet_time_not_after_the_back_off()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        int badTries = 0;
+        FileWriter writer = Make(folder, new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(50),
+            MaxDelay = TimeSpan.FromMilliseconds(50),
+            MaxFailedPasses = 100,
+            BeforeRename = temporary =>
+            {
+                if (temporary.Contains("bad.txt"))
+                {
+                    Interlocked.Increment(ref badTries);
+                    throw new IOException("disk full");
+                }
+            },
+        });
+        writer.Submit("bad.txt", Bytes("x"));
+        Assert.True(WaitFor(() => Volatile.Read(ref badTries) >= 4)); // the next try of bad.txt is about 400 ms away
+
+        // Act
+        int before = Volatile.Read(ref badTries);
+        writer.Submit("good.txt", Bytes("fine"));
+        bool written = WaitFor(() => File.Exists(Path.Combine(folder.Path, "good.txt")), 300);
+
+        // Assert
+        Assert.True(written);
+        Assert.Equal("fine", File.ReadAllText(Path.Combine(folder.Path, "good.txt")));
+        Assert.Equal(before, Volatile.Read(ref badTries));
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public void Run_Given_one_file_that_fails_and_one_that_does_not_When_the_allowed_passes_are_over_Then_only_the_failing_file_is_given_up()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        var counters = new Counters();
+        var logs = new List<string>();
+        FileWriter writer = Make(folder, new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(5),
+            MaxDelay = TimeSpan.FromMilliseconds(5),
+            MaxRetryDelay = TimeSpan.FromMilliseconds(10),
+            MaxFailedPasses = 3,
+            BeforeRename = temporary =>
+            {
+                if (temporary.Contains("bad.txt"))
+                {
+                    throw new IOException("disk full");
+                }
+            },
+        }, counters, logs);
+
+        // Act
+        writer.Submit("bad.txt", Bytes("x"));
+        writer.Submit("good.txt", Bytes("fine"));
+        bool failures = WaitFor(() => counters.WriterFailures >= 3);
+        Thread.Sleep(200);
+        writer.Submit("good2.txt", Bytes("later"));
+        bool later = WaitFor(() => File.Exists(Path.Combine(folder.Path, "good2.txt")));
+
+        // Assert
+        Assert.True(failures);
+        Assert.True(later);
+        Assert.Equal(3L, counters.WriterFailures); // bad.txt is not tried a fourth time
+        Assert.Equal("fine", File.ReadAllText(Path.Combine(folder.Path, "good.txt")));
+        Assert.False(File.Exists(Path.Combine(folder.Path, "bad.txt")));
+        Assert.Single(logs, l => l.Contains("given up"));
+        Assert.False(writer.IsIdle());
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public void Run_Given_two_files_that_fail_in_the_same_pass_When_they_fail_Then_only_one_failure_is_logged_and_both_are_counted()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        var counters = new Counters();
+        var logs = new List<string>();
+        FileWriter writer = Make(folder, new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(5),
+            MaxDelay = TimeSpan.FromMilliseconds(5),
+            MaxFailedPasses = 100,
+            BeforeRename = _ => throw new IOException("disk full"),
+        }, counters, logs);
+
+        // Act
+        writer.Submit("a.txt", Bytes("x"));
+        writer.Submit("b.txt", Bytes("y"));
+        bool both = WaitFor(() => counters.WriterFailures >= 2);
+        Thread.Sleep(50);
+        string[] seen;
+        lock (logs)
+        {
+            seen = logs.ToArray();
+        }
+
+        // Assert
+        Assert.True(both);
+        Assert.Single(seen);
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public void Run_Given_the_last_allowed_pass_fails_while_a_newer_content_is_submitted_When_given_up_Then_the_newer_content_is_still_tried_and_written()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        using var inside = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int calls = 0;
+        FileWriter writer = Make(folder, new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(20),
+            MaxDelay = TimeSpan.FromMilliseconds(20),
+            MaxFailedPasses = 1,
+            BeforeRename = _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    inside.Set();
+                    release.Wait(10_000);
+                    throw new IOException("disk full");
+                }
+            },
+        });
+        writer.Submit("a.txt", Bytes("old"));
+        Assert.True(inside.Wait(5000));
+
+        // Act
+        writer.Submit("a.txt", Bytes("new"));
+        release.Set();
+        bool written = WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")));
+
+        // Assert (only the content that failed is given up; the one never tried is written)
+        Assert.True(written);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(folder.Path, "a.txt")));
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Flush_Given_a_file_in_a_long_back_off_When_the_cause_is_gone_and_a_write_is_forced_Then_it_is_written_now(bool byWait)
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        int failures = 0;
+        bool broken = true;
+        FileWriter writer = Make(folder, new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(200),
+            MaxDelay = TimeSpan.FromMilliseconds(200),
+            MaxRetryDelay = TimeSpan.FromSeconds(60),
+            MaxFailedPasses = 100,
+            BeforeRename = _ =>
+            {
+                if (Volatile.Read(ref broken))
+                {
+                    Interlocked.Increment(ref failures);
+                    throw new IOException("disk full");
+                }
+            },
+        });
+        writer.Submit("a.txt", Bytes("x"));
+        Assert.True(WaitFor(() => Volatile.Read(ref failures) >= 3)); // the tries are 0.2, 0.4 and 0.8 s apart: the next one is 0.8 s away
+        Volatile.Write(ref broken, false);
+
+        // Act
+        bool ok = true;
+        if (byWait)
+        {
+            ok = writer.WaitWritten(TimeSpan.FromMilliseconds(500));
+        }
+        else
+        {
+            writer.Kick();
+            ok = WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")), 500);
+        }
+
+        // Assert
+        Assert.True(ok);
+        Assert.True(File.Exists(Path.Combine(folder.Path, "a.txt")));
         writer.Stop(TimeSpan.FromSeconds(2));
     }
 

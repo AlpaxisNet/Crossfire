@@ -82,6 +82,16 @@ public sealed class ExtraKeys
         return null;
     }
 
+    /// <summary>Not in C: makes this key's value <paramref name="value"/>, replacing every line it had (a new line at the end when it had none).</summary>
+    public void Set(string key, string value)
+    {
+        entries.RemoveAll(e => string.Equals(e.Key, key, StringComparison.OrdinalIgnoreCase));
+        entries.Add(new KeyValuePair<string, string>(key, value));
+    }
+
+    /// <summary>Not in C: removes every line with this key.</summary>
+    public void Remove(string key) => entries.RemoveAll(e => string.Equals(e.Key, key, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The values of every line with this key, in file order.</summary>
     public IEnumerable<string> GetAll(string key) =>
         entries.Where(e => string.Equals(e.Key, key, StringComparison.OrdinalIgnoreCase)).Select(e => e.Value);

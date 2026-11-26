@@ -16,12 +16,21 @@ internal static class Manifest
     public const int OpFindArchetype = 64;
     public const int OpFindArchetypeByRealName = 65;
 
-    private static Val Function(int id, string name) => Val.Map(
+    public const int OpMudAddObject = 66;
+    public const int OpMudAddSpecialObject = 67;
+
+    public const string EventOnUpdateObject = "onUpdateObject";
+    public const string EventOnMudDestroy = "onMudDestroy";
+    public const string EventOnLoadedMudAccount = "onLoadedMudAccount";
+
+    private static Val Function(int id, string name, string[] parameters, string ret) => Val.Map(
         ("id", Val.Int(id)),
         ("name", Val.Str(name)),
-        ("params", Val.List(Val.Str("string"))),
-        ("ret", Val.Str("handle:" + TMudArchMembers.TypeName)),
+        ("params", Val.List(parameters.Select(Val.Str))),
+        ("ret", Val.Str(ret)),
         ("slow", Val.False));
+
+    private static Val Event(string name, string target) => Val.Map(("name", Val.Str(name)), ("target", Val.Str(target)), ("mode", Val.Str("sync")));
 
     private static Val Member(ArchMember m) => Val.Map(
         ("id", Val.Int(m.Id)),
@@ -32,14 +41,24 @@ internal static class Manifest
 
     /// <summary>The manifest map: the two functions and the type TMudArch with its stable read-only members; <c>wants_tick</c> is false unless asked.</summary>
     public static Val Build(bool wantsTick = false) => Val.Map(
-        ("functions", Val.List(Function(OpFindArchetype, "findarchetype"), Function(OpFindArchetypeByRealName, "findarchetypebyrealname"))),
-        ("types", Val.List(Val.Map(
-            ("id", Val.Int(TMudArchMembers.TypeId)),
-            ("name", Val.Str(TMudArchMembers.TypeName)),
-            ("host", Val.Str("object")),
-            ("members", Val.List(TMudArchMembers.Members.Select(Member))),
-            ("methods", Val.List())))),
-        ("events", Val.List()),
+        ("functions", Val.List(
+            Function(OpFindArchetype, "findarchetype", new[] { "string" }, "handle:" + TMudArchMembers.TypeName),
+            Function(OpFindArchetypeByRealName, "findarchetypebyrealname", new[] { "string" }, "handle:" + TMudArchMembers.TypeName),
+            Function(OpMudAddObject, "mudaddobject", new[] { "float", "float", "string" }, "handle:" + TMudObjectMembers.TypeName),
+            Function(OpMudAddSpecialObject, "mudaddspecialobject", new[] { "float", "float", "int", "string", "string" }, "handle:" + TMudObjectMembers.TypeName))),
+        ("types", Val.List(
+            Val.Map(
+                ("id", Val.Int(TMudArchMembers.TypeId)),
+                ("name", Val.Str(TMudArchMembers.TypeName)),
+                ("host", Val.Str("object")),
+                ("members", Val.List(TMudArchMembers.Members.Select(Member))),
+                ("methods", Val.List())),
+            TMudObjectMembers.Table.ToManifest(),
+            TMudPlayerMembers.Table.ToManifest())),
+        ("events", Val.List(
+            Event(EventOnUpdateObject, "object"),
+            Event(EventOnMudDestroy, "object"),
+            Event(EventOnLoadedMudAccount, "player"))),
         ("wants_tick", Val.Bool(wantsTick)),
         ("limits", Val.Map(("max_list", Val.Int(256)))));
 

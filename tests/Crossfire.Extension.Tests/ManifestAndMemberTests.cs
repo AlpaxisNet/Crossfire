@@ -48,6 +48,27 @@ public class ManifestAndMemberTests
 
     // ------------------------------------------------------------------ the manifest (section 6)
 
+    [Theory]
+    [InlineData("TMudObject", "mudgraaltype", "npctype")]
+    [InlineData("TMudObject", "mudgraalparam", "npcparam")]
+    [InlineData("TMudObject", "mudcharm", "mudcharisma")]
+    [InlineData("TMudPlayer", "mudcharm", "mudcharisma")]
+    public void Build_Given_two_writable_members_of_one_field_When_listed_Then_neither_is_stable(string type, string a, string b)
+    {
+        // Arrange
+        Val t = Manifest.Build().Get("types")!.Items.Single(x => x.Get("name")!.AsString == type);
+
+        // Act
+        Val ma = t.Get("members")!.Items.Single(m => m.Get("name")!.AsString == a);
+        Val mb = t.Get("members")!.Items.Single(m => m.Get("name")!.AsString == b);
+
+        // Assert (protocol 6.1: a stable member changes only through a set of that same member)
+        // (a set of one name changes the value of the other, which the host would keep as it was if that one were stable)
+        Assert.False(ma.Get("stable")!.AsBool);
+        Assert.False(mb.Get("stable")!.AsBool);
+    }
+
+
     [Fact]
     public void Build_Given_the_manifest_When_checked_against_section_6_Then_it_is_valid()
     {
@@ -86,13 +107,37 @@ public class ManifestAndMemberTests
                 AssertName(m.Get("name")!.AsString);
                 AssertTypeName(m.Get("type")!.AsString, typeNames, isReturn: false);
                 Assert.Contains(m.Get("access")!.AsString, new[] { "r", "rw" });
-                Assert.Equal(ValKind.True, m.Get("stable")!.Kind);
+                Assert.Contains(m.Get("stable")!.Kind, new[] { ValKind.True, ValKind.False });
+                if (t.Get("name")!.AsString == "TMudArch")
+                {
+                    Assert.Equal(ValKind.True, m.Get("stable")!.Kind);
+                    Assert.Equal("r", m.Get("access")!.AsString);
+                }
             }
             Assert.Equal(memberNames.Distinct(StringComparer.OrdinalIgnoreCase).Count(), memberNames.Count);
-            Assert.Empty(t.Get("methods")!.Items);
+            var methodNames = new List<string>();
+            foreach (Val m in t.Get("methods")!.Items)
+            {
+                ids.Add(m.Get("id")!.AsInt);
+                methodNames.Add(m.Get("name")!.AsString);
+                AssertName(m.Get("name")!.AsString);
+                foreach (Val p in m.Get("params")!.Items)
+                {
+                    AssertTypeName(p.AsString, typeNames, isReturn: false);
+                }
+                AssertTypeName(m.Get("ret")!.AsString, typeNames, isReturn: true);
+            }
+            Assert.Equal(memberNames.Concat(methodNames).Distinct(StringComparer.OrdinalIgnoreCase).Count(), memberNames.Count + methodNames.Count);
         }
         Assert.All(ids, id => Assert.InRange(id, 1, int.MaxValue));
         Assert.Equal(ids.Distinct().Count(), ids.Count);
+        Assert.Equal(new[] { "TMudArch", "TMudObject", "TMudPlayer" }, typeNames);
+        Assert.Equal(new[] { "object", "npc", "player" }, types.Select(t => t.Get("host")!.AsString));
+        var events = manifest.Get("events")!.Items;
+        Assert.Equal(events.Select(e => e.Get("name")!.AsString).Distinct().Count(), events.Count);
+        Assert.All(events, e => AssertName(e.Get("name")!.AsString));
+        Assert.All(events, e => Assert.Contains(e.Get("target")!.AsString, new[] { "object", "player", "global" }));
+        Assert.All(events, e => Assert.Contains(e.Get("mode")!.AsString, new[] { "sync", "deferred" }));
         Assert.Equal(256L, manifest.Get("limits")!.Get("max_list")!.AsInt);
         Assert.Equal(ValKind.False, manifest.Get("wants_tick")!.Kind);
     }
@@ -135,16 +180,19 @@ public class ManifestAndMemberTests
     }
 
     [Fact]
-    public void Build_Given_the_two_functions_When_read_Then_the_ids_names_and_types_of_the_task()
+    public void Build_Given_the_four_functions_When_read_Then_the_ids_names_and_types_of_the_task()
     {
         // Arrange / Act
         var fs = Manifest.Build().Get("functions")!.Items;
 
         // Assert
-        Assert.Equal(new[] { 64L, 65L }, fs.Select(f => f.Get("id")!.AsInt));
-        Assert.Equal(new[] { "findarchetype", "findarchetypebyrealname" }, fs.Select(f => f.Get("name")!.AsString));
-        Assert.All(fs, f => Assert.Equal("handle:TMudArch", f.Get("ret")!.AsString));
-        Assert.All(fs, f => Assert.Equal(new[] { "string" }, f.Get("params")!.Items.Select(p => p.AsString)));
+        Assert.Equal(new[] { 64L, 65L, 66L, 67L }, fs.Select(f => f.Get("id")!.AsInt));
+        Assert.Equal(new[] { "findarchetype", "findarchetypebyrealname", "mudaddobject", "mudaddspecialobject" }, fs.Select(f => f.Get("name")!.AsString));
+        Assert.All(fs.Take(2), f => Assert.Equal("handle:TMudArch", f.Get("ret")!.AsString));
+        Assert.All(fs.Take(2), f => Assert.Equal(new[] { "string" }, f.Get("params")!.Items.Select(p => p.AsString)));
+        Assert.All(fs.Skip(2), f => Assert.Equal("handle:TMudObject", f.Get("ret")!.AsString));
+        Assert.Equal(new[] { "float", "float", "string" }, fs[2].Get("params")!.Items.Select(p => p.AsString));
+        Assert.Equal(new[] { "float", "float", "int", "string", "string" }, fs[3].Get("params")!.Items.Select(p => p.AsString));
     }
 
     [Fact]
@@ -478,6 +526,43 @@ public class ManifestAndMemberTests
         Assert.True(exited);
         Assert.Equal(0, process.ExitCode);
         Assert.Equal("", process.StandardOutput.ReadToEnd());
+    }
+
+    [Fact]
+    public void Main_Given_a_running_extension_When_it_gets_SIGTERM_Then_it_stays_until_the_connection_closes()
+    {
+        // Arrange (a service manager sends SIGTERM to the host and the extension at once; the extension must outlive it to write)
+        using var world = TestWorld.Make();
+        using var folder = new TempFolder();
+        string path = Path.Combine(folder.Path, "s");
+        using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        listener.Bind(new UnixDomainSocketEndPoint(path));
+        listener.Listen(1);
+        using Process process = Start("--connect", path);
+        using Socket accepted = listener.Accept();
+        accepted.ReceiveTimeout = 20_000;
+        using var stream = new NetworkStream(accepted, ownsSocket: false);
+        stream.Write(FrameCodec.Encode(new HelloFrame(ScriptedHost.HostHello(world.Path))));
+        FrameCodec.Read(stream, FrameCodec.InitialMaxFrame);
+        stream.Write(FrameCodec.Encode(new ReqFrame(1, 1, Array.Empty<ulong>(), ScriptedHost.NoCtx(), Array.Empty<Val>())));
+        ReadSkippingLogs(stream);
+
+        // Act
+        using (Process kill = Process.Start("kill", "-TERM " + process.Id)!)
+        {
+            kill.WaitForExit();
+        }
+        bool exitedAtTerm = process.WaitForExit(1500);
+        stream.Write(FrameCodec.Encode(new ReqFrame(2, 64, Array.Empty<ulong>(), ScriptedHost.NoCtx(), new[] { Val.Str("sword") })));
+        Frame? stillAnswers = ReadSkippingLogs(stream);
+        accepted.Shutdown(SocketShutdown.Both);
+        bool exitedAtEof = process.WaitForExit(5000);
+
+        // Assert
+        Assert.False(exitedAtTerm);
+        Assert.IsType<ReplyFrame>(stillAnswers);
+        Assert.True(exitedAtEof);
+        Assert.Equal(0, process.ExitCode);
     }
 
     private static Frame? ReadSkippingLogs(Stream stream)

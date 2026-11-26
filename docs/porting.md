@@ -118,6 +118,20 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | `get_ob_diff` | `CfWorld.GetObDiff` | ported |
 | `save_object` | `CfWorld.SaveObject` (into a `StringBuilder`) | ported |
 
+### common/map.c, include/map.h, server/player.c (the map file's header and object list, the player archetype)
+
+| C file | C name | C# member | Status |
+| --- | --- | --- | --- |
+| include/map.h | `mapdef`: the fields the header of a map file sets and writes | `MapHeader` | ported (name, msg, the timers, size, entry point, `unique`, `outdoor`, the weather fields and the four tile paths, with the defaults of `get_linked_map`); the squares, the players and the timers of a loaded map are the host's |
+| include/map.h | `MAP_FLUSH`, `MAP_PLAYER_UNIQUE`, `MAP_BLOCK`, `MAP_STYLE`, `MAP_OVERLAY` | `Define.MAP_*` | ported |
+| common/map.c | `load_map_header` | `CfWorld.LoadMapHeader` | ported (the tile paths are kept as written: `check_path` looks at the file system) |
+| common/map.c | `new_save_map` | `CfWorld.SaveMapHeader` | ported for the header it writes; opening, compressing and naming the file, and the file of unique items, are the host's |
+| common/map.c | `load_objects` | `CfWorld.LoadObjects` | ported: each object goes to `CrossfireHost.InsertObInMap` (`insert_ob_in_map`) with C's flags, `get_map_ob` is `CrossfireHost.GetMapOb`; `link_multipart_objects` is not ported (it walks the squares) |
+| common/map.c | `save_objects` | `CfWorld.SaveObjects` | ported: the host supplies the squares as lists of objects, bottom up, in the order C walks them |
+| common/map.c | `get_linked_map`'s defaults, `get_map_ob`, `insert_ob_in_map` (map.c's callers) | `MapHeader` defaults, `CrossfireHost` | the rest of map.c (loading and saving whole maps, swapping, the squares, `get_empty_map`, tiling, `map_path`, ...) is not ported: maps are the host's |
+| server/player.c | `get_player_archetype` | `CfWorld.GetPlayerArchetype` | ported (returns null with an error where C exits, and where C loops for ever when called with null and no player archetype exists) |
+| (not in C) | `ExtraKeys.Set`, `ExtraKeys.Remove` | `ExtraKeys` | helpers of the Graal Kingdoms extra lines |
+
 ### Other files
 
 | C file | C name | C# member | Status |
