@@ -1100,7 +1100,11 @@ it stays open until he closes it, logs out or opens another. The id `mud_contain
 (and not the ground container itself). The ground container is never an item of the window: `esrv_update_item` for it does nothing
 (the extension would take it for one of his items and kill its tag at the next flush).
 
-**`mudmoveinvobject(id, to, count)`** (function, op 8000, `Slow: true`, returns `bool`): `esrv_move_object`. `id` is an item of the
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `mudmoveinvobject` | 8000 | `int`, `int`, `int` | `bool` | a slow function: `ctx.player` moves `count` (0: all) of his item `id` into the container `to`, or out of its container for the window (below); true when it moved; busy before anything changes |
+
+**`mudmoveinvobject(id, to, count)`** (`esrv_move_object`). `id` is an item of the
 request player's own tree (`FindItemById`, deep: also an item of a closed sack; another player's id, a level object's, a dead tag, 0
 and a negative count are false with nothing said). `to`:
 

@@ -331,6 +331,8 @@ public sealed partial class ContainerTests
         ReplyFrame opened = g.T("apply", H(g.Hall[2]), Val.Int(0));
         long banana = Sets(opened).Where(kv => kv.Value.StartsWith("banana", StringComparison.Ordinal)).Select(kv => long.Parse(kv.Key.Substring("clientr.mud_item".Length))).Single();
         long bigsack = Sets(opened).Where(kv => kv.Value.StartsWith("bigsack", StringComparison.Ordinal)).Select(kv => long.Parse(kv.Key.Substring("clientr.mud_item".Length))).Single();
+        g.Ext.Call(3);
+        Assert.True(WaitFor(() => ReadData(g.Ext, "levels/hall.map").Contains("walk_off 1"))); // the open is written: the level is clean again
 
         // Act
         Assert.True(Result(g.Move(banana, bigsack, 0)));

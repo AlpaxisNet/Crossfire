@@ -1909,7 +1909,7 @@ public sealed class PickupTests
     [Fact]
     public void CommandDropAll_Given_an_object_of_a_kind_it_keeps_at_the_head_of_the_pack_When_run_Then_that_object_stays()
     {
-        // Arrange: money, keys, gems, food, an invisible object, a locked sword and an open sack, each in front of a ring that goes (with a container open every drop goes to put_object_in_sack, which is wave 6's: no ring goes to the ground then)
+        // Arrange: money, keys, gems, food, an invisible object, a locked sword and an open sack, each in front of a ring that goes (with a container open every drop goes to put_object_in_sack, lane 6A's: the ring goes into the open sack and none to the ground)
         foreach (string kept in new[] { "goldcoin", "key", "gem", "banana", "mist", "sack", "sword" })
         {
             string extra = kept == "sword" ? "inv_locked 1\n" : kept == "sack" ? "applied 1\n" : "";
@@ -1926,7 +1926,9 @@ public sealed class PickupTests
             // Assert
             Assert.Equal(0UL, r.Status);
             Assert.True((kept == "sack" ? Array.Empty<string>() : new[] { "ring" }).SequenceEqual(Effects(r, "npc.place").Select(p => g.Read(p.Get("handle")!.AsHandle, "mudrealname").AsString)), kept);
-            Assert.True(Lines(r).Count == 0, kept + ": " + string.Join("|", Lines(r))); // nothing said about what stayed
+            Assert.True(
+                (kept == "sack" ? new[] { "You put the rings in sack (open) (active)." } : Array.Empty<string>()).SequenceEqual(Lines(r)),
+                kept + ": " + string.Join("|", Lines(r))); // nothing said about what stayed
         }
     }
 
