@@ -25,6 +25,10 @@ internal static class PickupWorld
         + "Object sack\nname sack\nface sack.1\ntype 122\nweight 200\ncontainer 1000\nend\n"
         + "Object fruitbasket\nname fruitbasket\nface basket.1\ntype 122\nweight 200\nrace fruit\ncontainer 100000\nend\n"
         + "Object skeleton\nname skeleton key\nface key.1\ntype 21\nweight 10\nslaying vault\nend\n"
+        + "Object ring\nname ring\nname_pl rings\nface ring.1\ntype 70\nweight 10\nend\n"
+        + "Object potion\nname potion\nname_pl potions\nface potion.1\ntype 5\nweight 10\nend\n"
+        + "Object helmet\nname helmet\nface helmet.1\ntype 34\nweight 500\nend\n"
+        + "Object arrow\nname arrow\nname_pl arrows\nface arrow.1\ntype 13\nweight 5\nend\n"
         + "Object mist\nname mist\nface mist.1\nweight 10\ninvisible 1\nend\n"
         + "Object shaman\nname shaman\nface shaman.1\ntype 122\nweight 1\nrace fruit\nend\n";
 
@@ -52,12 +56,53 @@ internal static class PickupWorld
     public const int FarSword = 8;
 
     public const int OpCommand = 4900;
+    public const int OpDrop = 4901;
 
     /// <summary>The test lane's function <c>t5acommand(action, account, text)</c>: runs one of the commands in a request, as wave 7's table will.</summary>
     public static void Register(ManifestBuilder b)
     {
         ItemWorld.Register(b);
         b.AddFunction(Lane.Wave5A, new FunctionDef(OpCommand, "t5acommand", new[] { "string", "string", "any" }, "any", Handler: Command));
+        b.AddFunction(Lane.Wave5A, new FunctionDef(OpDrop, "t5adrop", new[] { "string", "string", "any" }, "any", Handler: DropDirect));
+    }
+
+    /// <summary>
+    /// <c>t5adrop(action, account, id)</c>: calls the ported <c>drop</c> of c_object.c itself (the commands skip the objects it handles
+    /// itself): "top" for the item of that tag, "head" for the first object of the pack, "sack" for the first object inside the first
+    /// container of the pack, "lastused" for the item of that tag after it was made the player's last used object (the answer is the tag
+    /// that is the last used one afterwards).
+    /// </summary>
+    private static Outcome DropDirect(Dispatcher d, IReadOnlyList<Val> a)
+    {
+        Player p = d.ControllerOf(a[1].AsString)!;
+        CfObject pl = p.State.Ob;
+        DropSite here = new(d.DropPlaceAt("hall", 5, 5, Val.Int(5), Val.Int(5)));
+        switch (a[0].AsString)
+        {
+            case "top":
+                return Outcome.Ok(Val.Bool(d.Pickups.Drop(pl, d.FindItemById(p.State, a[2].AsInt, deep: true), here)));
+            case "head":
+                return Outcome.Ok(Val.Bool(d.Pickups.Drop(pl, pl.Inv, here)));
+            case "sack":
+            {
+                CfObject sack = pl.Inv!;
+                while (sack.Type != Define.CONTAINER)
+                {
+                    sack = sack.Below!;
+                }
+                return Outcome.Ok(Val.Bool(d.Pickups.Drop(pl, sack.Inv, here)));
+            }
+            case "lastused":
+            {
+                CfObject item = d.FindItemById(p.State, a[2].AsInt, deep: true)!;
+                p.LastUsed = item;
+                p.LastUsedId = item.Count;
+                d.Pickups.Drop(pl, item, here);
+                return Outcome.Ok(Val.Int(p.LastUsedId));
+            }
+            default:
+                return Outcome.Fail(Status.BadArgs, "unknown action");
+        }
     }
 
     private static Outcome Command(Dispatcher d, IReadOnlyList<Val> a)
@@ -144,6 +189,9 @@ public sealed class PickupTests
             return r.Result.Items.Select(row => (row.Items[0].AsHandle, row.Items[1].AsString)).ToList();
         }
 
+        public ReplyFrame Direct(string action, long id = 0, string account = "bob") =>
+            Ext.Call(PickupWorld.OpDrop, new[] { S(action), S(account), Val.Int(id) }, level: "hall", player: account);
+
         public Val Read(ulong handle, string member) => Say.Get(Ext, handle, Obj(member));
 
         public ReplyFrame ReadRaw(ulong handle, string member) => Ext.Call(9, new[] { H(handle), Val.Int(Obj(member)) });
@@ -199,6 +247,7 @@ public sealed class PickupTests
         using var g = new Game();
         ulong banana = g.Hall[PickupWorld.Banana];
         ulong stack = g.Items(g.Player).Single(i => i.Name == "banana").Handle;
+        int tags = g.Ext.Dispatcher.LiveItemTags;
 
         // Act
         ReplyFrame r = g.Pick(banana, 5);
@@ -210,6 +259,7 @@ public sealed class PickupTests
         Assert.Equal("bananas,mud_banana.png,6,9,900,0,0", Sets(r)[Key(stack)]); // 4 and 5
         Assert.Equal(9L, g.Read(stack, "mudnrof").AsInt);
         Assert.DoesNotContain(Key(banana), Sets(r).Keys);
+        Assert.Equal(tags, g.Ext.Dispatcher.LiveItemTags); // the freed object keeps no tag
     }
 
     [Fact]
@@ -1288,20 +1338,36 @@ public sealed class PickupTests
     }
 
     [Fact]
-    public void CommandDropAll_Given_misc_When_run_Then_the_listed_types_that_are_not_applied_go()
+    public void CommandDropAll_Given_misc_When_run_Then_the_listed_types_that_are_not_applied_go_and_nothing_else()
     {
-        // Arrange: a bow (14) is a weapon type, a tool (162) is no misc type: nothing of the inventory is on C's list but the potion and the ring
-        using var g = new Game(inventory: "arch sword\nend\narch banana\nend\narch tool\nend\n");
+        // Arrange: C's list has rings and potions, not a sword, a banana (food), a helmet (armour) or a tool; the applied ring stays
+        using var g = new Game(inventory: "arch ring\nend\narch potion\nend\narch ring\napplied 1\nend\narch sword\nend\narch banana\nend\narch helmet\nend\narch tool\nend\n");
         Feet(g);
-        Assert.Equal(0UL, g.Ext.Call(ItemWorld.OpDo, new[] { S("add"), S("bob"), S("sword"), Val.Int(1) }, player: "bob").Status);
 
         // Act
         ReplyFrame r = g.Command("dropall", "misc");
 
         // Assert
         Assert.Equal(0UL, r.Status);
-        Assert.Empty(Effects(r, "npc.place"));
-        Assert.Equal(4, g.Items(g.Player).Count(i => i.Name is "sword" or "banana" or "tool"));
+        Assert.Equal(new[] { "potion", "ring" }, Effects(r, "npc.place").Select(p => g.Read(p.Get("handle")!.AsHandle, "mudrealname").AsString).Order());
+        Assert.Equal(new[] { "banana", "helmet", "ring", "sword", "tool" }, g.Items(g.Player).Select(i => i.Name).Order());
+    }
+
+    [Fact]
+    public void CommandDropAll_Given_armor_and_weapons_When_run_Then_helmets_shields_and_arrows_are_on_the_lists_too()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch helmet\nend\narch arrow\nnrof 3\nend\narch ring\nend\n");
+        Feet(g);
+
+        // Act
+        ReplyFrame armor = g.Command("dropall", "armor");
+        ReplyFrame weapons = g.Command("dropall", "weapons");
+
+        // Assert
+        Assert.Equal(new[] { "helmet" }, Effects(armor, "npc.place").Select(p => g.Read(p.Get("handle")!.AsHandle, "mudrealname").AsString));
+        Assert.Equal(new[] { "arrow" }, Effects(weapons, "npc.place").Select(p => g.Read(p.Get("handle")!.AsHandle, "mudrealname").AsString));
+        Assert.Equal(new[] { "ring" }, g.Items(g.Player).Select(i => i.Name));
     }
 
     [Fact]
@@ -1550,6 +1616,157 @@ public sealed class PickupTests
         Assert.True(Result(r));
         ulong inside = Assert.Single(g.Items(sack, player: false)).Handle;
         Assert.Equal("1", Sets(r)[Key(inside)].Split(',')[6]); // shown inside the open container
+    }
+
+    // ------------------------------------------------------------------ drop() itself
+
+    [Fact]
+    public void Drop_Given_an_invisible_object_at_the_head_of_the_pack_When_dropped_Then_the_next_visible_one_goes_and_with_none_the_text()
+    {
+        // Arrange: the pack is a sword and, in front of it, a mist that is invisible
+        using var g = new Game(inventory: "arch sword\nend\n");
+        g.Ext.Call(ItemWorld.OpDo, new[] { S("add"), S("bob"), S("mist"), Val.Int(1) }, player: "bob");
+
+        // Act
+        ReplyFrame first = g.Direct("head");
+        ReplyFrame second = g.Direct("head");
+
+        // Assert
+        Assert.True(Result(first));
+        Assert.Equal("sword", g.Read(Effects(first, "npc.place").Single().Get("handle")!.AsHandle, "mudrealname").AsString);
+        Assert.False(Result(second)); // only the mist is left
+        Assert.Equal(new[] { "You don't have anything to drop." }, Lines(second));
+    }
+
+    [Fact]
+    public void Drop_Given_an_invisible_object_in_a_sack_When_dropped_Then_it_is_thrown_away_and_nothing_lies_on_the_ground()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch sack\narch mist\nend\nend\n");
+        ulong sack = g.Items(g.Player).Single().Handle;
+        int tags = g.Ext.Dispatcher.LiveItemTags;
+
+        // Act
+        ReplyFrame r = g.Direct("sack");
+
+        // Assert
+        Assert.False(Result(r));
+        Assert.Empty(Effects(r, "npc.place"));
+        Assert.Empty(Lines(r));
+        Assert.Equal(sack, Assert.Single(g.Items(g.Player)).Handle);
+        Assert.True(g.Ext.Dispatcher.LiveItemTags <= tags);
+    }
+
+    [Fact]
+    public void Drop_Given_the_last_used_object_When_it_is_dropped_Then_the_last_used_one_is_a_neighbour_or_none()
+    {
+        // Arrange: two items, then one
+        using var g = new Game(inventory: "arch sword\nend\narch banana\nend\n");
+        var items = g.Items(g.Player);
+
+        // Act
+        ReplyFrame first = g.Direct("lastused", (uint)items[0].Handle);
+        ReplyFrame second = g.Direct("lastused", (uint)items[1].Handle);
+
+        // Assert
+        Assert.Equal(0UL, first.Status);
+        Assert.NotEqual(0L, first.Result.AsInt); // the neighbour that was left
+        Assert.Equal(0L, second.Result.AsInt); // nothing is left
+    }
+
+    [Fact]
+    public void Drop_Given_an_open_container_When_the_player_drops_Then_put_object_in_sack_is_asked_and_nothing_goes_to_the_ground_without_it()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch sack\napplied 1\nend\narch sword\nend\n");
+        var items = g.Items(g.Player);
+        ulong sack = items.Single(i => i.Name == "sack").Handle;
+        ulong sword = items.Single(i => i.Name == "sword").Handle;
+        g.Ext.Call(ItemWorld.OpDo, new[] { S("open"), S("bob"), Val.Int((uint)sack) }, player: "bob");
+        var asked = new List<string>();
+
+        // Act
+        ReplyFrame without = g.Direct("top", (uint)sword);
+        g.Ext.Dispatcher.PutObjectInSack = (op, container, tmp, nrof) =>
+        {
+            asked.Add(container.Name + "<-" + tmp.Name + ":" + nrof);
+            return true;
+        };
+        ReplyFrame with = g.Direct("top", (uint)sword);
+
+        // Assert
+        Assert.False(Result(without));
+        Assert.Empty(Effects(without, "npc.place"));
+        Assert.True(Result(with));
+        Assert.Equal(new[] { "sack<-sword:0" }, asked);
+        Assert.Empty(Effects(with, "npc.place"));
+    }
+
+    [Fact]
+    public void Drop_Given_a_locked_object_or_one_with_no_drop_When_dropped_by_drop_Then_the_text_or_nothing()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch sword\ninv_locked 1\nend\narch relic\nend\n");
+        var items = g.Items(g.Player);
+
+        // Act
+        ReplyFrame locked = g.Direct("top", (uint)items.Single(i => i.Name == "sword").Handle);
+        ReplyFrame relic = g.Direct("top", (uint)items.Single(i => i.Name == "relic").Handle);
+
+        // Assert
+        Assert.False(Result(locked));
+        Assert.Equal(new[] { "This item is locked" }, Lines(locked));
+        Assert.False(Result(relic));
+        Assert.Empty(Lines(relic));
+        Assert.Equal(2, g.Items(g.Player).Count);
+    }
+
+    [Fact]
+    public void PickUp_Given_a_level_object_with_script_state_When_it_is_picked_up_and_dropped_Then_the_new_face_has_no_blob_and_no_flags()
+    {
+        // Arrange: the host gave the object its script state
+        using var g = new Game(inventory: "");
+        ulong sword = g.Hall[PickupWorld.Sword];
+        Assert.Equal(0UL, g.Ext.Call(16, new[] { Val.List(Val.List(H(sword), N(3), N(4), S("state of the npc"))) }, level: "hall").Status);
+        Assert.True(Result(g.Pick(sword, 1)));
+
+        // Act
+        ReplyFrame r = g.Drop(sword, 2, 2, 0);
+
+        // Assert
+        Val place = Assert.Single(Effects(r, "npc.place"));
+        Assert.True(place.Get("blob")!.IsNil);
+    }
+
+    [Fact]
+    public void CommandTake_Given_an_empty_text_When_taken_Then_it_is_as_no_text_and_the_first_object_that_can_be_picked_up_goes()
+    {
+        // Arrange
+        using var g = new Game(inventory: "");
+        ulong sword = Made(g, "sword", 12.5, 12.5);
+        Feet(g, x: 12.5, y: 12.5);
+
+        // Act
+        ReplyFrame r = g.Command("take", "");
+
+        // Assert
+        Assert.Equal(sword, Assert.Single(Effects(r, "npc.remove")).Get("handle")!.AsHandle);
+    }
+
+    [Fact]
+    public void CommandDrop_Given_an_answer_that_is_no_position_When_dropped_Then_the_text_and_nothing_changes()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch sword\nend\n");
+        FakeHost host = Feet(g);
+        host.Answer = (_, _) => new QueryAnswer(Status.Ok, S("somewhere"));
+
+        // Act
+        ReplyFrame r = g.Command("drop", "sword");
+
+        // Assert
+        Assert.Equal(new[] { "You can't drop that here." }, Lines(r));
+        Assert.Single(g.Items(g.Player));
     }
 
     // ------------------------------------------------------------------ sack_can_hold
