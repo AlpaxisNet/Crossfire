@@ -32,7 +32,9 @@ internal static class StartWorld
         + "Object book\nname book\nname_pl books\ntype 8\nweight 200\nvalue 30\nend\n"
         + "Object cleric_book\nname cleric book\nname_pl cleric books\ntype 85\nweight 300\nvalue 40\nend\n"
         + "Object ability_fire\nname fire ability\ntype 110\ninvisible 1\nsp 9\nend\n"
-        + "Object goldcoin\nname gold coin\nname_pl gold coins\ntype 36\nvalue 10\nend\n";
+        + "Object goldcoin\nname gold coin\nname_pl gold coins\ntype 36\nvalue 10\nend\n"
+        + "Object trinket\nname trinket\ntype 6\nvalue 5\nend\n"
+        + "Object con_force\nname con force\ntype 114\nCon 5\nend\n";
 
     public const string Treasures =
         "treasure warrior_class_items\n  arch skill_melee_weapon\n  more\n  arch skill_praying\n  more\n  arch sword\n  more\n  arch chain_mail\n  more\n  arch sack\n"
@@ -882,6 +884,160 @@ public sealed class StartPathTests : IDisposable
         // Assert
         Assert.False(Directory.Exists(Path.Combine(world.Path, "data", "backups")));
         Assert.False(File.Exists(AccountFile(world)));
+    }
+
+    [Fact]
+    public void SetMudClass_Given_a_second_choice_When_set_Then_the_experience_and_the_things_the_player_had_before_stay()
+    {
+        // Arrange
+        using DirectExt ext = StartWorld.Start(world);
+        ulong h = Hello(ext);
+        CfWorld w = ext.Dispatcher.WorldOfTests!;
+        CfObject pl = Ob(ext);
+        CfObject trinket = w.InsertObInOb(w.ArchToObject(w.FindArchetype("trinket"))!, pl);
+        Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
+        CfObject agility = Items(pl).First(i => i.Arch!.Name == "experience_agility");
+        agility.Stats.Exp = 500;
+
+        // Act
+        Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("thief_class"));
+
+        // Assert
+        Assert.Contains(trinket, Items(pl));
+        Assert.Same(agility, Items(pl).First(i => i.Arch!.Name == "experience_agility"));
+        Assert.Equal(500, agility.Stats.Exp);
+    }
+
+    [Fact]
+    public void SetMudClass_Given_a_tree_read_from_a_file_with_an_old_class_and_start_items_When_set_Then_those_go_though_this_session_did_not_give_them()
+    {
+        // Arrange
+        using DirectExt ext = StartWorld.Start(world);
+        ulong h = Hello(ext);
+        CfWorld w = ext.Dispatcher.WorldOfTests!;
+        CfObject pl = Ob(ext);
+        CfObject oldClass = w.InsertObInOb(w.ArchToObject(w.FindArchetype("warrior_class"))!, pl);
+        CfObject start = w.InsertObInOb(w.ArchToObject(w.FindArchetype("trinket"))!, pl);
+        start.SetFlag(Define.FLAG_STARTEQUIP);
+        CfObject plain = w.InsertObInOb(w.ArchToObject(w.FindArchetype("sack"))!, pl);
+
+        // Act
+        Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("thief_class"));
+
+        // Assert
+        Assert.DoesNotContain(oldClass, Items(pl));
+        Assert.DoesNotContain(start, Items(pl));
+        Assert.Contains(plain, Items(pl));
+    }
+
+    [Fact]
+    public void SetMudClass_Given_a_rolled_player_and_a_list_with_an_applied_force_When_set_Then_the_player_is_fixed_with_the_bonus_of_the_force()
+    {
+        // Arrange
+        using TempFolder bonus = StartWorld.Make("treasure warrior_class_items\n  arch con_force\n  end\n");
+        using DirectExt ext = StartWorld.Start(bonus);
+        ulong h = Hello(ext);
+        Dice(ext, RollDice(13, 18, 12, 15, 17, 14, 16));
+        Method(ext, h, TMudPlayerMembers.MethodRollStats);
+        long con = Get(ext, h, Ply("mudconstitution")).AsInt;
+
+        // Act
+        Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
+
+        // Assert
+        Assert.Equal(16L, con);
+        Assert.Equal(21L, Get(ext, h, Ply("mudconstitution")).AsInt);
+    }
+
+    [Fact]
+    public void MudResetPlayer_Given_a_readied_skill_and_a_nested_item_When_reset_Then_the_skill_is_unreadied_and_the_handle_of_the_inner_item_dies_too()
+    {
+        // Arrange
+        using DirectExt ext = StartWorld.Start(world);
+        ulong h = Hello(ext);
+        CfWorld w = ext.Dispatcher.WorldOfTests!;
+        CfObject pl = Ob(ext);
+        CfObject sack = w.InsertObInOb(w.ArchToObject(w.FindArchetype("sack"))!, pl);
+        CfObject inner = w.InsertObInOb(w.ArchToObject(w.FindArchetype("trinket"))!, sack);
+        ext.Dispatcher.HandlesOfTests.HandleOf(inner);
+        pl.ChosenSkill = sack;
+        pl.ExpObj = sack;
+
+        // Act
+        Method(ext, h, TMudPlayerMembers.MethodMudResetPlayer);
+
+        // Assert
+        Assert.False(ext.Dispatcher.HandlesOfTests.Has(inner));
+        Assert.Null(pl.ChosenSkill);
+        Assert.Null(pl.ExpObj);
+    }
+
+    [Fact]
+    public void LoadMudAccount_Given_the_extension_is_busy_When_called_or_unloaded_Then_busy_and_the_player_is_as_it_was()
+    {
+        // Arrange
+        using DirectExt ext = StartWorld.Start(world);
+        ulong h = Hello(ext);
+        Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
+        ext.Dispatcher.Busy = "saving";
+        CfObject before = Ob(ext);
+
+        // Act
+        ReplyFrame load = Method(ext, h, TMudPlayerMembers.MethodLoadMudAccount, args: S("_2"));
+        ReplyFrame unload = Method(ext, h, TMudPlayerMembers.MethodUnloadMudAccount);
+
+        // Assert
+        Assert.Equal(new[] { (ulong)Status.Busy, (ulong)Status.Busy }, new[] { load.Status, unload.Status });
+        Assert.Same(before, Ob(ext));
+        Assert.NotEmpty(Items(before));
+    }
+
+    [Fact]
+    public void LoadMudAccount_Given_a_slot_When_saved_Then_the_file_names_the_slot_as_its_account_and_a_login_reads_it_without_a_complaint()
+    {
+        // Arrange
+        using DirectExt ext = StartWorld.Start(world);
+        ulong h = Hello(ext);
+        Method(ext, h, TMudPlayerMembers.MethodSetMudClass, args: S("warrior_class"));
+        Method(ext, h, TMudPlayerMembers.MethodSaveMudAccount);
+        WaitForFile(AccountFile(world));
+        File.Copy(AccountFile(world), AccountFile(world, "bob_2"));
+        Method(ext, h, TMudPlayerMembers.MethodMudLoadAccount, args: S("2"));
+
+        // Act
+        Method(ext, h, TMudPlayerMembers.MethodSaveMudAccount);
+        string text = "";
+        for (int i = 0; i < 200 && !text.Contains("account bob_2"); i++)
+        {
+            Thread.Sleep(10);
+            text = File.ReadAllText(AccountFile(world, "bob_2"));
+        }
+        ext.Logs.Clear();
+        ReplyFrame again = Method(ext, h, TMudPlayerMembers.MethodMudLoadAccount, args: S("2"));
+
+        // Assert
+        Assert.Contains("\naccount bob_2\n", text);
+        Assert.True(again.Result.AsBool);
+        Assert.DoesNotContain(ext.Logs, l => l.Text.Contains("says it belongs to another account"));
+    }
+
+    [Fact]
+    public void Player_Given_malformed_lines_for_the_rolled_values_When_logged_in_Then_they_are_ignored_and_the_player_is_not_rolled()
+    {
+        // Arrange
+        Directory.CreateDirectory(Path.Combine(world.Path, "data", "accounts"));
+        File.WriteAllText(AccountFile(world), "arch dwarf_player\naccount bob\nname bob\nmudorigstats 1 2 3\nmudlevhp 1 2 x 4 5 6 7 8 9 10\nmudlevsp 1 2 3 4 5 6 7 8 9 10 11\nend\n");
+        using DirectExt ext = StartWorld.Start(world);
+
+        // Act
+        Hello(ext);
+        Player contr = ext.Dispatcher.ControllerOf("bob")!;
+
+        // Assert
+        Assert.False(contr.StatsRolled);
+        Assert.All(contr.LevHp, v => Assert.Equal(0, v));
+        Assert.All(contr.LevSp, v => Assert.Equal(0, v));
+        Assert.DoesNotContain(ext.Logs, l => l.Text.Contains(" had "));
     }
 
     // ------------------------------------------------------------------ the manifest
