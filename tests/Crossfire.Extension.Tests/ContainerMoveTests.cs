@@ -368,6 +368,8 @@ public sealed partial class ContainerTests
         long ring = g.Tag("ring");
         long sack = g.Tag("sack");
 
+        g.Ext.Dispatcher.ApplySpecialUnapply = null; // lane 6B sets it at session.init
+
         // Act
         ReplyFrame missing = g.Move(ring, sack, 0);
         g.Ext.Dispatcher.ApplySpecialUnapply = (op, tmp) => 1;

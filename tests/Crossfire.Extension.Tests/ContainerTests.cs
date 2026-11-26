@@ -424,13 +424,13 @@ public sealed partial class ContainerTests
     public void Apply_Given_the_types_of_the_lane_When_asked_by_manual_apply_Then_a_container_and_the_closer_are_answered_with_1_and_any_other_type_with_null()
     {
         // Arrange
-        using var g = new Game("arch sack\napplied 1\narch closer\nend\nend\narch banana\nend\narch closer\nend\n");
+        using var g = new Game("arch sack\napplied 1\narch closer\nend\nend\narch sword\nend\narch closer\nend\n");
         long sack = g.Tag("sack");
         Apply(g, sack);
         long inside = g.Inner("sack", "closer");
 
         // Act
-        ReplyFrame banana = Apply(g, g.Tag("banana"));
+        ReplyFrame banana = Apply(g, g.Tag("sword"));
         ReplyFrame lonely = g.T("apply", Val.Int(g.Tag("closer")), Val.Int(0));
         ReplyFrame closes = Apply(g, inside);
 
