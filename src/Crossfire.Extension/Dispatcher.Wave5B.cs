@@ -195,8 +195,10 @@ internal sealed partial class Dispatcher
         }
         uint nrof = item.Nrof;
         bool applied = item.QueryFlag(Define.FLAG_APPLIED);
+        int carrying = item.Carrying;
         world!.RemoveOb(item);
         world.CopyObject(at.Clone, item);
+        item.Carrying = carrying; // the copy takes the archetype's (empty) Carrying; the contents of a sack stay in it
         item.Nrof = nrof;
         item.SetFlag(Define.FLAG_IDENTIFIED);
         if (applied)

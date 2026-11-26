@@ -1091,7 +1091,8 @@ wrong number or kind of arguments are `bad_args`.
 `mudcountinvobject(text, deep)` and `mudfindinvobject(text)` (the id of the best match of the top level, -1 for a miss) are the same
 searches. `mudresetinvobject(id)` takes the item out of its holder, copies its archetype's clone over it (`copy_object`: every field,
 and the extra lines such as `mudowner` and `mudrealname` go), keeps its count, identified and applied state, and puts it back, where it
-may merge into an equal stack (its handle is then dead); true, or false for an unknown id. `mudorderinventory(ids)` links the items
+may merge into an equal stack (its handle is then dead); a sack keeps its contents and the weight of them (`Carrying`, which the copy would
+reset to the archetype's); true, or false for an unknown id. `mudorderinventory(ids)` links the items
 named by a list of ids (top level of the player's own tree, once each, unknown ids skipped) at the head of the inventory in that order.
 `findMudObject(id)` is `findinvobjectbyid(id, true)` of the request's player. `mudhaveskill(name)` and `mudskilllevel(name)` look for the
 skill object (type 43) of that name in the top level of the player's tree (letters in any case); the level is that of the skill's

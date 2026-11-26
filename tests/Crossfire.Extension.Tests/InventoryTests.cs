@@ -275,6 +275,27 @@ public sealed class InventoryTests : IDisposable
         Assert.Equal(1 + fits, Count(pl, "sword"));
     }
 
+    [Theory]
+    [InlineData(10, true)]
+    [InlineData(9, false)]
+    [InlineData(11, true)]
+    public void AddInvObject_Given_exactly_the_room_for_a_relic_When_added_Then_the_limit_itself_is_allowed_and_one_gram_more_is_not(int room, bool added)
+    {
+        // Arrange: a relic weighs 10 g; the player has `room` grams left under weight_limit[Str]
+        using DirectExt ext = Start();
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        CfObject pl = Pl(ext, "bob");
+        pl.Carrying = (int)(ItemMatching.WeightLimitOf(pl.Stats.Str) - pl.Weight - room);
+        long relics = Count(pl, "relic");
+
+        // Act
+        ReplyFrame r = Method(ext, bob, TMudPlayerMembers.MethodAddInvObject, "bob", Val.Int(1), S("relic"));
+
+        // Assert
+        Assert.Equal(added, r.Result.Kind == ValKind.Handle);
+        Assert.Equal(added ? relics + 1 : relics, Count(pl, "relic"));
+    }
+
     [Fact]
     public void AddInvObject2_Given_more_than_the_player_can_carry_When_added_Then_the_limit_is_ignored_and_no_text_is_sent()
     {
@@ -1090,6 +1111,29 @@ public sealed class InventoryTests : IDisposable
     }
 
     [Fact]
+    public void MudResetInvObject_Given_a_sack_with_contents_When_reset_Then_its_carrying_is_still_the_weight_of_the_contents()
+    {
+        // Arrange
+        using DirectExt ext = Start();
+        Login(ext, "bob");
+        CfObject bag = First(Pl(ext, "bob"), "bag")!;
+        int bagCarrying = bag.Carrying;
+        int carried = Pl(ext, "bob").Carrying;
+        long id = Tag(ext, bag);
+        Assert.True(bagCarrying > 0);
+
+        // Act
+        ReplyFrame r = Fn(ext, Manifest.OpMudResetInvObject, "bob", Val.Int(id));
+
+        // Assert
+        Assert.True(r.Result.AsBool);
+        CfObject now = First(Pl(ext, "bob"), "bag")!;
+        Assert.NotNull(now.Inv);
+        Assert.Equal(bagCarrying, now.Carrying);
+        Assert.Equal(carried, Pl(ext, "bob").Carrying);
+    }
+
+    [Fact]
     public void MudResetInvObject_Given_an_applied_item_When_reset_Then_it_is_still_applied()
     {
         // Arrange
@@ -1154,6 +1198,28 @@ public sealed class InventoryTests : IDisposable
         Assert.Same(after[0], after[1].Above);
         Assert.Same(after[^2], after[^1].Above);
         Assert.Null(after[^1].Below);
+    }
+
+    [Fact]
+    public void MudOrderInventory_Given_the_id_of_an_item_in_the_open_sack_When_ordered_Then_it_stays_in_the_sack_and_the_pack_is_unchanged()
+    {
+        // Arrange
+        using DirectExt ext = Start();
+        Login(ext, "bob");
+        CfObject pl = Pl(ext, "bob");
+        CfObject bag = First(pl, "bag")!;
+        CfObject inside = bag.Inv!;
+        pl.Container = bag; // the sack is open: the id of what is in it resolves even without deep
+        long insideId = Tag(ext, inside);
+        string before = Snapshot(pl);
+
+        // Act
+        ReplyFrame r = Fn(ext, Manifest.OpMudOrderInventory, "bob", Val.List(Val.Int(insideId)));
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.Same(bag, inside.Env);
+        Assert.Equal(before, Snapshot(pl));
     }
 
     [Fact]

@@ -213,7 +213,7 @@ internal sealed partial class Dispatcher
     /// <c>startequip</c>), the class archetype goes into the player's tree, the player gets the experience objects it lacks, the
     /// starting items of the class's <c>randomitems</c> list (<c>give_initial_items</c>) and its skills linked to their experience
     /// (<c>key_change_class</c> in player.c does these in this order for <c>d</c>), and <c>mudclass</c> becomes the name without
-    /// <c>_class</c>. True when the class exists. The stat bonuses of the class (<c>add_statbonus</c>) are wave 5D's.
+    /// <c>_class</c>. True when the class exists. The stat bonuses of the class (<c>add_statbonus</c>) are not called: GK's class is an object whose stats fix_player adds (docs/differences.md).
     /// </summary>
     private Outcome SetMudClass(PlayerState ps, string name)
     {

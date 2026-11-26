@@ -615,6 +615,25 @@ public sealed class PickupTests
     }
 
     [Fact]
+    public void Drop_Given_a_whole_sack_with_contents_When_dropped_Then_the_tags_of_its_contents_die_with_it_and_the_sacks_own_stays()
+    {
+        // Arrange
+        using var g = new Game();
+        ulong bag = g.Items(g.Player).Single(i => i.Name == "bag").Handle;
+        ulong inner = g.Items(bag, player: false).Single().Handle; // the banana in the sack gets a tag
+        int tags = g.Ext.Dispatcher.LiveItemTags;
+
+        // Act
+        ReplyFrame r = g.Drop(bag, 2, 2, 0);
+
+        // Assert
+        Assert.True(Result(r));
+        Assert.Equal(tags - 2, g.Ext.Dispatcher.LiveItemTags); // the sack leaves the item table (its level object keeps the tag) and the banana's tag is gone
+        Assert.Equal(0UL, g.ReadRaw(bag, "mudnrof").Status); // the sack's handle still reads
+        Assert.Equal((ulong)Status.BadHandle, g.ReadRaw(inner, "mudnrof").Status); // the banana's handle is dead
+    }
+
+    [Fact]
     public void Drop_Given_a_whole_object_When_dropped_Then_the_face_is_a_new_one_never_merged_with_another_object_of_the_square()
     {
         // Arrange
