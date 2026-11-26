@@ -52,6 +52,22 @@ internal sealed partial class Dispatcher
         return null;
     }
 
+    /// <summary>
+    /// A container that lies on the ground is going away (its level unloads, a script destroys it): every player who has it open closes
+    /// it first, as <c>esrv_apply_container</c> does, so that no player keeps a container that is freed (a drop would put his things into it
+    /// and lose them). C closes a container at the walk-off, which is not ported.
+    /// </summary>
+    private void CloseOpenOn(CfObject sack)
+    {
+        foreach (PlayerState ps in players.Values.ToList())
+        {
+            if (ps.Ob is { Container: { } open } pl && open == sack)
+            {
+                Pickups.EsrvApplyContainer(pl, sack);
+            }
+        }
+    }
+
     /// <summary>C's <c>esrv_send_inventory</c> and the like: the whole window of the player is looked at again at the next flush.</summary>
     internal void WholeWindow(PlayerState ps) => AskForWholeWindow(ps);
 

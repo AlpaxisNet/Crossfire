@@ -266,6 +266,10 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Ok(Val.Nil);
         }
+        foreach (LevelObject lo in level.Objects)
+        {
+            CloseOpenOn(lo.Ob);
+        }
         if (level.Dirty)
         {
             SubmitLevel(level);
@@ -411,6 +415,7 @@ internal sealed partial class Dispatcher
         {
             effects.Add(Val.Map(("k", Val.Str("npc.remove")), ("handle", Val.Handle(handles.HandleOf(lo)))));
         }
+        CloseOpenOn(lo.Ob);
         lo.Dead = true;
         lo.Level.Objects.Remove(lo);
         lo.Level.Dirty = true;
