@@ -870,7 +870,7 @@ take the player of the request's context (a script that runs for the player call
 
 | Name | Id | Params | Result | What it does |
 | --- | --- | --- | --- | --- |
-| `mudresetplayer` | 2500 and function 2000 | none | `void` | every item of the tree is freed (its handle dies, its string is marked for deletion); the readied skill, the known spells and the marked object are gone; `mudclass` is cleared; experience 0, level 1, food 999; the stats are rolled again; no `onLoadedMudAccount` |
+| `mudresetplayer` | 2500 and function 2000 | none | `void` | every item of the tree is freed (its tag dies, its string is deleted by the flush of the request); the readied skill, the known spells and the marked object are gone; `mudclass` is cleared; experience 0, level 1, food 999; the stats are rolled again; no `onLoadedMudAccount` |
 | `rollstats` | 2501 and function `mudrollstats` 2001 | none | `void` | `roll_stats` of player.c: seven stats, each the best three of four dice, again until the sum is 82 to 116, put in order from high to low (`Str`, `Dex`, `Con`, `Int`, `Wis`, `Pow`, `Cha`: config.h has `SORT_ROLLED_STATS`), kept as the rolled stats, level 0 and experience 0, then the level goes to 1 (the dice of level 1 for hp, sp and grace), `fix_player`, hp and sp at their largest; the strings that changed are set |
 | `setmudclass` | 2502 | `string` | `bool` | the name of a class archetype (`warrior_class`): see below; false and a log line for a name that is no archetype |
 | `setmudclassnoaction` | 2503 | `string` | `void` | sets `mudclass` only (the empty text clears it) |
@@ -889,7 +889,7 @@ another one: Alpaxis's choice, so that choosing again does not give the first it
 (`type` 37); the player gets the experience objects it lacks (`init_player_exp`); `give_initial_items` makes the class's `randomitems`
 list into the tree with `GT_STARTEQUIP | GT_ONLY_GOOD`; `link_player_skills`; `fix_player`. `mudclass` becomes the name without the
 trailing `_class` (Alpaxis's choice: GK's own script copies `clientr.class`, which has no suffix, with `setmudclassnoaction`).
-Every item of the top level is marked for the next flush. The stat bonuses of the class (`add_statbonus`) are wave 5D's.
+The tags of what was freed die at once (`ReleaseItemTags`, `KillItem`) and the controller is told to look at the whole window (`Reconcile`), so that the flush of the same request deletes the strings of what left and sets those of what came. The stat bonuses of the class (`add_statbonus`) are wave 5D's.
 
 **The accounts' file and the rolled values.** `orig_stats`, `levhp`, `levsp` and `levgrace` of `struct pl` are kept on the player's
 object as the lines `mudorigstats` (`Str Dex Con Wis Cha Int Pow`), `mudlevhp`, `mudlevsp` and `mudlevgrace` (the values of levels 1

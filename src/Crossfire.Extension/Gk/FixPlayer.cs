@@ -77,7 +77,7 @@ internal static class FixPlayer
             Life(op, pl, manaObj, graceObj);
         }
         // c_object.c: the most the player can pick up, by Str
-        pl.WeightLimit = LivingRules.WeightLimit[Math.Clamp((int)op.Stats.Str, 0, Define.MAX_STAT)];
+        pl.WeightLimit = ItemMatching.WeightLimitOf(op.Stats.Str);
     }
 
     // fix_player's awarding of hp, sp and grace

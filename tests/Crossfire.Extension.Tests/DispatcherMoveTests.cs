@@ -107,4 +107,49 @@ public class DispatcherMoveTests
         Assert.True(File.Exists(Data(world, "accounts/ann.txt")));
         d.Release();
     }
+
+    [Fact]
+    public void SubmitMove_Given_an_unloaded_account_When_a_move_is_recorded_Then_its_file_is_not_written_and_the_level_is()
+    {
+        // Arrange
+        using TempFolder world = ObjectWorld.Make(("hall.nw", ObjectWorld.SeedHall));
+        Dispatcher d = Start(world);
+        Call(d, 7, new[] { Say.S("hall.nw"), Val.Nil }, "hall.nw");
+        Call(d, 5, new[] { Say.S("ann") }, player: "ann");
+        Level level = Field<Dictionary<string, Level>>(d, "levels")["hall.nw"];
+        PlayerState ann = Field<Dictionary<string, PlayerState>>(d, "players")["ann"];
+        level.Dirty = true;
+        ann.Loaded = false; // unloadmudaccount: its file is kept, a blank player never overwrites it
+
+        // Act
+        d.SubmitMove(level, null, null, ann);
+        d.Finish(true);
+
+        // Assert
+        Assert.False(File.Exists(Data(world, "accounts/ann.txt")));
+        Assert.Single(Directory.GetFiles(Data(world, "levels")));
+        d.Release();
+    }
+
+    [Fact]
+    public void SubmitMove_Given_an_account_in_another_slot_When_a_move_is_recorded_Then_the_file_of_the_slot_is_written_not_the_one_of_the_account()
+    {
+        // Arrange
+        using TempFolder world = ObjectWorld.Make();
+        Dispatcher d = Start(world);
+        Call(d, 5, new[] { Say.S("ann") }, player: "ann");
+        Call(d, 5, new[] { Say.S("bob") }, player: "bob");
+        var players = Field<Dictionary<string, PlayerState>>(d, "players");
+        players["ann"].FileKey = "annslot"; // loadmudaccount("_slot") keeps the account but the file is the slot's
+
+        // Act
+        d.SubmitMove(null, players["bob"], null, players["ann"]);
+        bool written = WaitFor(() => File.Exists(Data(world, "accounts/annslot.txt")) && File.Exists(Data(world, "accounts/bob.txt")));
+
+        // Assert
+        Assert.True(written);
+        Assert.False(File.Exists(Data(world, "accounts/ann.txt")));
+        d.Finish(true);
+        d.Release();
+    }
 }

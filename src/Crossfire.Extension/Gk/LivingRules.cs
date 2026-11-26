@@ -57,17 +57,7 @@ internal static class LivingRules
         30, 40, 50, 70, 100,
     };
 
-    /// <summary>living.c <c>weight_limit</c>: the most a character of that Str can carry, in grams.</summary>
-    public static readonly int[] WeightLimit =
-    {
-        200000,
-        250000, 300000, 350000, 400000, 500000,
-        600000, 700000, 800000, 900000, 1000000,
-        1100000, 1200000, 1300000, 1400000, 1500000,
-        1650000, 1800000, 1950000, 2100000, 2250000,
-        2400000, 2550000, 2700000, 2850000, 3000000,
-        3250000, 3500000, 3750000, 4000000, 4500000,
-    };
+    // living.c weight_limit[] is ItemMatching.WeightLimit (one table, lane 4C's: the flush and fix_player both read it)
 
     // living.c levels[MAXLEVEL+1] (static): the experience needed for each level (settings.simple_exp is off, as Crossfire's default has it)
     private static readonly uint[] Levels =
