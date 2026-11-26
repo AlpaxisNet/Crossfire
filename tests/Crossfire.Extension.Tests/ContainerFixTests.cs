@@ -87,4 +87,19 @@ public sealed partial class ContainerTests
         Assert.Equal("bananax2", g.Tree());
         Assert.Contains("nrof 1", ReadData(g.Ext, "levels/hall.map"));
     }
+
+    [Fact]
+    public void Move_Given_a_sack_inside_a_sack_of_the_pack_as_the_place_When_an_item_is_moved_into_it_Then_it_goes_in()
+    {
+        // Arrange
+        using var g = new Game("arch bigsack\napplied 1\narch lightsack\napplied 1\nend\nend\narch banana\nend\n");
+        long inner = g.Inner("bigsack", "lightsack");
+
+        // Act
+        ReplyFrame r = g.Move(g.Tag("banana"), inner, 0);
+
+        // Assert
+        Assert.True(Result(r));
+        Assert.Equal("bigsack[lightsack[banana]]", g.Tree());
+    }
 }

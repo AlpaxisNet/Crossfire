@@ -60,4 +60,52 @@ public sealed partial class ApplyTests
         Assert.NotEqual(0UL, sixth.Status); // the handle is dead
         Assert.True(WaitUntil(() => !DataFile(g.Ext, "levels/hall.map").Contains("arch banana")));
     }
+
+    [Fact]
+    public void PlayerApply_Given_a_flying_player_and_an_object_of_his_inventory_When_applied_Then_he_is_not_floating_above_it()
+    {
+        // Arrange
+        using var g = new Game("arch sword\nend\n");
+        long id = g.Id(g.Item("sword"));
+
+        // Act
+        ReplyFrame r = g.Ext.Call(ApplyWorld.OpDo, new[] { S("flyinv"), S("bob"), Val.Int(id), Val.Nil }, player: "bob");
+
+        // Assert
+        Assert.DoesNotContain("But you are floating high above the ground!", Lines(r));
+        Assert.Contains(r.Events, e => e.Get("name")!.AsString == "onApply"); // the apply went on: the script is asked
+    }
+
+    [Fact]
+    public void DefaultApply_Given_an_unpaid_item_that_is_worn_When_applied_Then_it_is_taken_off_without_paying()
+    {
+        // Arrange
+        using var g = new Game("arch sword\nunpaid 1\napplied 1\nend\n");
+        ulong sword = g.Item("sword");
+
+        // Act
+        ReplyFrame r = g.DefaultApply(sword);
+
+        // Assert
+        Assert.DoesNotContain("You should pay for it first.", Lines(r));
+        Assert.False(g.Applied(sword));
+    }
+
+    [Fact]
+    public void MudApplyInvObject_Given_an_item_inside_a_sack_of_the_pack_When_applied_by_id_Then_it_is_found_and_the_script_is_told()
+    {
+        // Arrange
+        using var g = new Game("arch sack\napplied 1\narch sword\nend\nend\n");
+        ulong sack = g.Item("sack");
+        ReplyFrame rows = g.Ext.Call(12, new[] { H(sack), Val.Int(Obj("muditems")), Val.List(Val.Int(Obj("mudrealname"))) });
+        ulong sword = rows.Result.Items.First(x => x.Items[1].AsString == "sword").Items[0].AsHandle;
+
+        // Act
+        ReplyFrame r = g.ApplyId(sword);
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.Contains("onApplyItem", EventNames(r));
+        Assert.Contains("onApply", r.Events.Select(e => e.Get("name")!.AsString));
+    }
 }

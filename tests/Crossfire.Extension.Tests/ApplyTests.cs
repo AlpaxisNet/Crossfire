@@ -140,6 +140,14 @@ internal static class ApplyWorld
                 pl.ClearFlag(Define.FLAG_FLYING);
                 return Outcome.Ok(Val.Int(answer));
             }
+            case "flyinv": // a flying player applies an object of his inventory (by id)
+            {
+                CfObject item = d.FindItemById(p.State, a[2].AsInt, deep: true)!;
+                pl.SetFlag(Define.FLAG_FLYING);
+                int answer = d.Applies.PlayerApply(pl, item, 0, quiet: false);
+                pl.ClearFlag(Define.FLAG_FLYING);
+                return Outcome.Ok(Val.Int(answer));
+            }
             case "lastused":
             {
                 CfObject item = d.FindItemById(p.State, a[2].AsInt, deep: true)!;

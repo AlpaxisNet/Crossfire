@@ -375,6 +375,24 @@ public sealed class ConsumableTests
         Assert.Empty(f.Host.Lines);
     }
 
+    [Theory]
+    [InlineData(99, false)]
+    [InlineData(100, true)]
+    public void ApplyFood_Given_food_that_brings_the_stomach_to_999_or_over_When_eaten_Then_only_the_surplus_is_a_waste(int value, bool full)
+    {
+        // Arrange: 900 + 99 is exactly full, 900 + 100 is one too many
+        var f = new Fixture();
+        (CfObject ob, _) = f.Player(food: 900);
+        CfObject apple = f.Give(ob, "apple", o => o.Stats.Food = (short)value);
+
+        // Act
+        Consumable.ApplyFood(f.World, ob, apple);
+
+        // Assert
+        Assert.Equal(full, f.Host.Lines.Contains("You feel full, but what a waste of food!"));
+        Assert.Equal(999, ob.Stats.Food);
+    }
+
     [Fact]
     public void ApplyFood_Given_a_food_with_a_title_When_eaten_Then_the_special_food_runs_after_the_normal_one()
     {

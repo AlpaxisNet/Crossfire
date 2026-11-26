@@ -23,6 +23,8 @@ internal static class ReadableWorld
         + "Object torch\nname torch\nname_pl torches\nface torch.1\nweight 500\nmaterial 16\nother_arch torch_lit\nglow_radius 1\nend\n"
         + "Object torch_lit\nname lit torch\nname_pl lit torches\nface torch.2\nweight 500\nmaterial 16\nglow_radius 3\nend\n"
         + "Object paper\nname paper\nname_pl papers\nface paper.1\nweight 10\nmaterial 1\nend\n"
+        + "Object lamp\nname lamp\nname_pl lamps\nface lamp.1\nweight 50\nmaterial 16\nglow_radius 2\nend\n"
+        + "Object tinder\nname tinder\nname_pl tinders\nface tinder.1\nweight 50\nmaterial 16\nother_arch torch_lit\nend\n"
         + "Object burnout\nname burnout\nface burnout.1\nweight 0\nend\n"
         + "Object chest\nname chest\nname_pl chests\nface chest.1\ntype 4\nhp 1\nweight 100\nrandomitems chest_items\nend\n"
         + "Object bare_chest\nname bare chest\nname_pl bare chests\nface chest.2\ntype 4\nweight 100\nend\n"
@@ -38,12 +40,14 @@ internal static class ReadableWorld
         + "arch sign\nx 3\ny 4\nmsg\nKeep out.\nendmsg\nend\n"
         + "arch bare_chest\nx 3\ny 4\narch sword\nnrof 1\nend\narch banana\nnrof 1\nend\nend\n"
         + "arch bare_chest\nx 3\ny 4\nnrof 2\nend\n"
-        + "arch sign\nx 3\ny 4\nfood 1\nmsg\nOnce.\nendmsg\nend\n";
+        + "arch sign\nx 3\ny 4\nfood 1\nmsg\nOnce.\nendmsg\nend\n"
+        + "arch bare_chest\nx 3\ny 4\nnrof 1\nend\n";
 
     public const int GroundSign = 0;
     public const int GroundChest = 1;
     public const int GroundEmptyChests = 2;
     public const int GroundCountedSign = 3;
+    public const int GroundOneEmptyChest = 4;
 
     public const int OpApply = 11900;
 
@@ -651,6 +655,26 @@ public sealed class ReadableTests
         Assert.Equal(new[] { "burnout", "lighter", "paper x3" }, g.Names());
     }
 
+    [Theory]
+    [InlineData("lamp")]
+    [InlineData("tinder")]
+    public void ApplyLighter_Given_an_object_with_only_one_of_other_arch_and_glow_radius_When_it_burns_Then_it_is_no_light_and_the_burnout_comes(string arch)
+    {
+        // Arrange: a light needs both (a glow_radius and an other_arch to change to); the roll 1 fails the save of wood
+        using var g = new Game("arch lighter\nend\narch " + arch + "\nend\n");
+        g.Control.Mark = g.Item(arch);
+        g.Control.MarkCount = g.Item(arch).Count;
+        Strong(g);
+        Roll(g, 0);
+
+        // Act
+        ReplyFrame r = g.Apply(g.Item("lighter"));
+
+        // Assert
+        Assert.Equal(new[] { "You light the " + arch + " with the lighter." }, Lines(r));
+        Assert.Equal(new[] { "burnout", "lighter" }, g.Names());
+    }
+
     [Fact]
     public void ApplyLighter_Given_a_paper_stack_where_none_burns_When_lit_Then_the_player_fails_and_the_burnout_comes_all_the_same()
     {
@@ -998,6 +1022,21 @@ public sealed class ReadableTests
         Assert.Equal(2, Effects(r, "npc.place").Count);
         Assert.Equal(new[] { g.Hall[ReadableWorld.GroundChest] }, Effects(r, "npc.remove").Select(e => e.Get("handle")!.AsHandle));
         Assert.Equal((ulong)Status.BadHandle, g.Ext.Call(9, new[] { H(g.Hall[ReadableWorld.GroundChest]), Val.Int(Obj("mudrealname")) }).Status); // the handle is dead
+    }
+
+    [Fact]
+    public void ApplyTreasure_Given_an_empty_chest_of_a_stack_of_one_on_the_ground_When_applied_Then_it_goes_with_its_face()
+    {
+        // Arrange: "nrof 1" is a stack of one, which is not the same as C's nrof 0 for a single object, and goes the same way
+        using var g = new Game();
+
+        // Act
+        ReplyFrame r = g.ApplyGround(ReadableWorld.GroundOneEmptyChest);
+
+        // Assert
+        Assert.Equal(new[] { "The chest was empty." }, Lines(r));
+        Assert.Equal(new[] { g.Hall[ReadableWorld.GroundOneEmptyChest] }, Effects(r, "npc.remove").Select(e => e.Get("handle")!.AsHandle));
+        Assert.Equal((ulong)Status.BadHandle, g.Ext.Call(9, new[] { H(g.Hall[ReadableWorld.GroundOneEmptyChest]), Val.Int(Obj("mudrealname")) }).Status);
     }
 
     [Fact]
