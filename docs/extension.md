@@ -681,7 +681,7 @@ last column.
 | `ismudobject` | 545 | bool | r | yes | always true | objects.md 5.5: true for a player with a loaded mud account |
 | `muditems` | 1500 | list:handle:TMudObject | r | no | the visible objects of the player's `ob->inv` | as on `TMudObject` |
 | `mudmoney` | 1501 | int | r | no | `query_money` over the player's tree | mud-phase3.md 4.2; GS1's `playermudmoney` reads it |
-| `markedobject` | 1502 | ref | rw | no | `contr->mark` (c_object.c `find_marked_object`) | mud-phase3.md 4.2: **1.1 only**. Read: the proxy of the marked item, "" when none (or when the item left the inventory: C clears the mark then); written: an item of the player's own top level marks it, nil or "" clears it, any other handle changes nothing |
+| `markedobject` | 1502 | ref:TMudObject | rw | no | `contr->mark` (c_object.c `find_marked_object`) | mud-phase3.md 4.2: **1.1 only**. Read: the proxy of the marked item (the type is `ref:TMudObject`: the host turns a bare `ref` into nil for an item, and a script reading the mark got 0), "" when none (or when the item left the inventory: C clears the mark then); written: an item of the player's own top level marks it, nil or "" clears it, any other handle changes nothing |
 | `currentweapon` | 1503 | handle:TMudObject | r | no | `ob->current_weapon` | mud-phase3.md 4.2: the applied weapon when it is in the player's inventory, else nil (the same source as `getwieldedobject`) |
 
 ### Events
