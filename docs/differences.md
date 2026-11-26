@@ -238,7 +238,7 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
 - **`setmudclass`, `mudresetplayer` and the account methods** are Alpaxis's own: GK's original is not available (docs/mud-phase3.md
   section 4.7 gives its source). Alpaxis's choices: `mudclass` is the class name without `_class`; choosing a class again takes the
   first choice's items out; `mudresetplayer` clears `mudclass`; `loadmudaccount` with a suffix fails when the file is missing;
-  `backupmudaccount` writes `backups/<file>.<UTC time>.txt`; the methods answer a bool where a script might test them.
+  `backupmudaccount(name)` writes `backups/<file><name>.<UTC time>.txt` (the name is a suffix of the account's file name, escaped like it; wave 7B); the methods answer a bool where a script might test them.
 
 ## Pick up and drop (`Crossfire.Extension/Gk/Pickup*.cs`; lane 5A of phase 3)
 
@@ -435,3 +435,26 @@ C's arithmetic (golden values: `tests/Crossfire.Extension.Tests/golden/consumabl
   to level.
 - **The trap of a chest** (C springs a `RUNE` found in it) is not ported (traps are phase 4).
 - **Types 160 (furniture) and 161 (house doors)** answer "You can't apply that." (housing is not phase 3). C has no such types.
+
+## The account completion and trade (`Gk/AccountLife.cs`, `Gk/Trade.cs`, `Dispatcher.Wave7B.cs`; lane 7B of phase 3)
+
+- **C runs `fix_player` at login, and so does the extension now.** C's `check_login` ends the load with `sum_weight`,
+  `init_player_exp`, `link_player_skills`, `legal_range` and `fix_player` (login.c at 8b7ee7f90). Before wave 7 the extension read the file
+  and nothing fixed the player until the first change of his tree. The file's player is fixed at `player.login` and at a load, a new
+  player is not (C's new player goes through the start path). In a world with no experience category the two experience calls are
+  skipped (C's `init_player_exp` would zero the player's experience). `link_player_skills` unreadies the skill, as in C.
+- **The equipment hooks are the login's.** C has none (a plugin sees nothing at login); Graal Kingdoms' scripts need `onWeaponWielded`
+  and the like to set what a worn item shows, so a loaded account sends them for every applied item, in the order of the tree, after the
+  strings and before `onLoadedMudAccount` (docs/mud-phase3.md section 4.7).
+- **`backupmudaccount(name)`**: C has no such function. The name is a suffix of the file name (GK passes ""), escaped like an account
+  name, so no name leaves `backups/`.
+- **`mudtransferobject`** is Alpaxis's own (GK's original is not available). It moves one item or part of a stack between two logged-in
+  players with C's own pieces (`get_split_ob`, `apply_special` to unapply, `remove_ob` and `insert_ob_in_ob`, the weight test of
+  `pick_up_object`). Alpaxis's choices: a count above the stack is refused (C's pick up takes the whole stack); the text of a refusal for
+  weight goes to the receiver (C's picker); the second argument must be 0 (nothing shows what 1 meant in GK's fishing rod: it is refused);
+  the receiver knows the item by an id of his own; no `mudowner` is set; no text on success.
+- **`mudexamineinvobject2`** shows another player's item to the asker with the lines of `examine` (the same as for his own items);
+  C's examine of a player's item does not exist (a player never looks into another's pack). The id is looked for in the other
+  player's tree, so whoever knows an id of it can read the item's text (GK's trade window sends the id to the buyer).
+- **`player.examineinvobject(id)`** examines an item of the player's own tree (it is `mudexamineinvobject` for a handle).
+

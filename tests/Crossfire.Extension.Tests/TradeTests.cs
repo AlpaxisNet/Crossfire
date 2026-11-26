@@ -306,6 +306,8 @@ public sealed class TradeTests
         Assert.Contains(Effects(r, "client.set"), e => e.Get("player")!.AsString == "carol" && e.Get("name")!.AsString.StartsWith("clientr.mud_item", StringComparison.Ordinal)
             && e.Get("value")!.AsString.StartsWith("ring", StringComparison.Ordinal));
         Assert.False(Result(Transfer(g, id, 1, 0))); // the old id is dead for bob
+        Assert.NotEqual(0UL, g.Ext.Call(9, new[] { H(ring), Val.Int(Obj("mudrealname")) }).Status); // and so is the handle a script held
+        Assert.NotEqual(id, g.Id(g.Item(carol, "ring"))); // carol's window knows it by an id of her own
     }
 
     [Fact]
@@ -362,6 +364,7 @@ public sealed class TradeTests
 
         // Assert
         Assert.False(Result(r));
+        Assert.Empty(W7Game.Lines(r, "bob")); // refused before anything is tried
         Assert.Equal(5, Quantity(g, bananas));
         Assert.Equal(bobBefore, g.Names(bob));
         Assert.Equal(carolBefore, g.Names(carol));
@@ -488,12 +491,15 @@ public sealed class TradeTests
         }
         g.Ob("bob").Container = sack;
         sack.SetFlag(Define.FLAG_APPLIED);
+        g.IdOf(sack.Inv!); // the banana in it has a tag
+        int tags = g.Dispatcher.LiveItemTags;
 
         // Act
         ReplyFrame r = Transfer(g, g.Id(g.Item(bob, "sack")), 1, 0);
 
         // Assert
         Assert.True(Result(r));
+        Assert.Equal(tags - 1, g.Dispatcher.LiveItemTags); // the tag of the banana died with the giver's window; the sack has one again in carol's
         Assert.Null(g.Ob("bob").Container);
         Assert.False(sack.QueryFlag(Define.FLAG_APPLIED));
         Assert.DoesNotContain("sack", g.Names(bob));
@@ -513,6 +519,7 @@ public sealed class TradeTests
         var contr = (Player)g.Ob("bob").Contr!;
         contr.Mark = item;
         contr.MarkCount = item.Count;
+        g.Ob("bob").CurrentWeapon = item;
 
         // Act
         Assert.True(Result(Transfer(g, g.Id(ring), 1, 0)));
@@ -520,6 +527,7 @@ public sealed class TradeTests
         // Assert
         Assert.Null(contr.Mark);
         Assert.Equal(0u, contr.MarkCount);
+        Assert.NotSame(item, g.Ob("bob").CurrentWeapon); // fix_player chooses again: his wielded sword
     }
 
     [Fact]
@@ -721,6 +729,64 @@ public sealed class TradeTests
 
         // Assert
         Assert.Equal((ulong)Status.UnknownOp, r.Status);
+    }
+
+    [Fact]
+    public void Transfer_Given_a_cursed_applied_weapon_When_given_Then_false_he_keeps_it_and_nothing_changed()
+    {
+        // Arrange
+        using var g = new W7Game(bob: ApplyWorld.Skills + "arch sword\napplied 1\ncursed 1\nend\n");
+        (ulong bob, ulong carol) = Both(g);
+
+        // Act
+        ReplyFrame r = Transfer(g, g.Id(g.Item(bob, "sword")), 1, 0);
+
+        // Assert: apply_special cannot unapply it
+        Assert.False(Result(r));
+        Assert.Contains("sword", g.Names(bob));
+        Assert.Equal(1, g.Items(carol).Count(i => i.Name == "sword"));
+        Assert.True(Get(g.Ext, g.Item(bob, "sword"), Obj("applied")).AsBool);
+    }
+
+    [Fact]
+    public void Transfer_Given_a_sack_that_holds_the_sack_he_has_open_When_given_Then_the_open_one_is_closed()
+    {
+        // Arrange
+        using var g = new W7Game(bob: ApplyWorld.Skills + "arch sack\narch sack\narch banana\nend\nend\nend\n");
+        (ulong bob, _) = Both(g);
+        CfObject outer = g.Ob("bob").Inv!;
+        while (outer.Type != Define.CONTAINER)
+        {
+            outer = outer.Below!;
+        }
+        CfObject inner = outer.Inv!;
+        g.Ob("bob").Container = inner;
+        inner.SetFlag(Define.FLAG_APPLIED);
+
+        // Act
+        ReplyFrame r = Transfer(g, g.Id(g.Item(bob, "sack")), 1, 0);
+
+        // Assert
+        Assert.True(Result(r));
+        Assert.Null(g.Ob("bob").Container);
+        Assert.False(inner.QueryFlag(Define.FLAG_APPLIED));
+    }
+
+    [Fact]
+    public void Transfer_Given_the_index_of_the_giver_himself_When_called_Then_false_and_the_tree_is_untouched()
+    {
+        // Arrange: a light pack, so that the weight is no reason to refuse
+        using var g = new W7Game(bob: ApplyWorld.Skills + "arch ring\nend\n");
+        (ulong bob, _) = Both(g);
+        ulong ring = g.Item(bob, "ring");
+
+        // Act
+        ReplyFrame r = Transfer(g, g.Id(ring), 0, 0);
+
+        // Assert
+        Assert.False(Result(r));
+        Assert.Equal(ring, g.Item(bob, "ring"));
+        Assert.Empty(g.WrittenMoves);
     }
 
     // ------------------------------------------------------------------ the write order

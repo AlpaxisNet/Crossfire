@@ -249,6 +249,25 @@ public sealed class AccountLifeTests
     }
 
     [Fact]
+    public void Login_Given_a_file_with_all_the_experience_objects_When_the_player_logs_in_Then_they_are_applied_and_his_experience_is_their_sum()
+    {
+        // Arrange: the objects were saved unapplied by a hand
+        string[] categories = { "agility", "personality", "mental", "physique", "magic", "wis" };
+        string objects = string.Concat(categories.Select((c, i) => "arch experience_" + c + "\nexp " + (1_000_000 * (i + 1)) + "\nend\n"));
+        using var g = new W7Game(bob: ApplyWorld.Skills + objects, header: ApplyWorld.Header + "exp 5\n");
+
+        // Act
+        g.Login("bob");
+
+        // Assert: init_player_exp makes the experience of the player the sum of the objects and their levels follow their experience
+        CfObject pl = g.Ob("bob");
+        Assert.Equal(21_000_000, pl.Stats.Exp);
+        Assert.All(Items(pl).Where(i => i.Type == Define.EXPERIENCE), i => Assert.True(i.Level > 1));
+        Assert.All(Items(pl).Where(i => i.Type == Define.EXPERIENCE), i => Assert.True(i.QueryFlag(Define.FLAG_APPLIED)));
+        Assert.Equal(6, Items(pl).Count(i => i.Type == Define.EXPERIENCE));
+    }
+
+    [Fact]
     public void Login_Given_a_file_with_rolled_stats_When_the_player_logs_in_Then_the_strings_of_the_login_show_what_fix_player_makes_of_them()
     {
         // Arrange
@@ -267,7 +286,7 @@ public sealed class AccountLifeTests
     public void Login_Given_a_file_whose_player_was_never_rolled_When_the_player_logs_in_Then_fix_player_has_set_his_weight_limit()
     {
         // Arrange
-        using var g = new W7Game(bob: ApplyWorld.Skills + "arch sword\nend\n", header: "level 1\nStr 14\n");
+        using var g = new W7Game(bob: "", header: "level 1\nStr 14\n"); // no item: nothing else calls fix_player
 
         // Act
         g.Login("bob");
@@ -327,34 +346,58 @@ public sealed class AccountLifeTests
         Assert.Equal(AccountLife.RangeWand, contr.ShootType);
     }
 
-    [Fact]
-    public void LegalRange_Given_each_range_When_asked_Then_it_is_legal_when_the_player_has_what_it_needs()
+    [Theory]
+    [InlineData("arch wand\napplied 1\nend\n", AccountLife.RangeWand, true)]
+    [InlineData("arch wand\nend\n", AccountLife.RangeWand, false)]
+    [InlineData("arch rod\napplied 1\nend\n", AccountLife.RangeRod, true)]
+    [InlineData("arch rod\napplied 1\nend\n", AccountLife.RangeWand, false)]
+    [InlineData("arch rod\nend\n", AccountLife.RangeRod, false)]
+    [InlineData("arch horn\napplied 1\nend\n", AccountLife.RangeHorn, true)]
+    [InlineData("arch horn\napplied 1\nend\n", AccountLife.RangeRod, false)]
+    [InlineData("arch horn\nend\n", AccountLife.RangeHorn, false)]
+    [InlineData("arch wand\napplied 1\nend\n", AccountLife.RangeHorn, false)]
+    [InlineData("arch wand\napplied 1\nend\n", AccountLife.RangeBow, false)]
+    [InlineData("arch wand\napplied 1\nend\n", AccountLife.RangeNone, true)]
+    [InlineData("arch wand\napplied 1\nend\n", AccountLife.RangeScroll, false)]
+    [InlineData("arch wand\napplied 1\nend\n", AccountLife.RangeMagic, false)]
+    [InlineData("arch wand\napplied 1\nend\n", AccountLife.RangeSkill, false)]
+    [InlineData("arch wand\napplied 1\nend\n", 99, false)]
+    public void LegalRange_Given_a_range_When_asked_Then_it_is_legal_when_the_player_has_what_it_needs(string items, int range, bool expected)
     {
         // Arrange
-        using var g = new W7Game(bob: ApplyWorld.Skills + "arch wand\napplied 1\nend\narch rod\nend\narch horn\napplied 1\nend\n");
+        using var g = new W7Game(bob: ApplyWorld.Skills + items);
+        g.Login("bob");
+
+        // Act / Assert
+        Assert.Equal(expected, AccountLife.LegalRange(g.Ob("bob"), range));
+    }
+
+    [Fact]
+    public void LegalRange_Given_a_bow_a_known_spell_and_a_readied_skill_When_asked_Then_each_makes_its_range_legal()
+    {
+        // Arrange
+        using var g = new W7Game(bob: ApplyWorld.Skills);
         g.Login("bob");
         CfObject pl = g.Ob("bob");
         CfWorld w = g.Ext.Dispatcher.WorldOfTests!;
-
-        // Act / Assert
-        Assert.True(AccountLife.LegalRange(pl, AccountLife.RangeNone));
-        Assert.True(AccountLife.LegalRange(pl, AccountLife.RangeWand));
-        Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeRod)); // the rod is not applied
-        Assert.True(AccountLife.LegalRange(pl, AccountLife.RangeHorn));
         Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeBow));
-        Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeScroll));
-        Assert.False(AccountLife.LegalRange(pl, 99));
-        Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeMagic)); // no spell is known
-        Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeSkill)); // link_player_skills unapplied the skill
+        Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeMagic));
+        Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeSkill)); // link_player_skills unreadied the skill
+
+        // Act
         CfObject bow = w.GetObject();
         bow.Type = Define.BOW;
         bow.SetFlag(Define.FLAG_APPLIED);
         w.InsertObInOb(bow, pl);
         ((Player)pl.Contr!).KnownSpells.Add(1);
         pl.ChosenSkill = pl.Inv;
+
+        // Assert
         Assert.True(AccountLife.LegalRange(pl, AccountLife.RangeBow));
         Assert.True(AccountLife.LegalRange(pl, AccountLife.RangeMagic));
         Assert.True(AccountLife.LegalRange(pl, AccountLife.RangeSkill));
+        bow.ClearFlag(Define.FLAG_APPLIED);
+        Assert.False(AccountLife.LegalRange(pl, AccountLife.RangeBow));
     }
 
     // ------------------------------------------------------------------ loadmudaccount, unloadmudaccount, Mud_LoadAccount
@@ -393,7 +436,7 @@ public sealed class AccountLifeTests
         Assert.All(hooks, h => Assert.Contains(g.Items(bob), i => i.Handle == h.Item));
         Assert.Equal("onLoadedMudAccount", EventNames(r).Last());
         Assert.Single(r.Events, e => e.Get("name")!.AsString == "onLoadedMudAccount");
-        Assert.Contains("clientr.mud_str", W7Game.Sets(r).Keys);
+        Assert.Equal("14", W7Game.Sets(r)["clientr.mud_str"]); // fix_player ran: the stats are the rolled ones
         Assert.Contains("sword", g.Names(bob));
     }
 
