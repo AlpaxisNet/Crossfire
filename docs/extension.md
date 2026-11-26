@@ -126,7 +126,10 @@ logged-in player. `stats` counts the tags given out (`tags`, dead ones included)
   that name, only when the level's name is a plain file name: no `/`, `\` or NUL, not `.` or `..`), else the level is unknown. A
   level that is saved takes precedence over the seed for good: a level whose saved file holds no objects stays empty. A file that
   exists and cannot be read (no permission, a folder in its place) is logged, the level stays unknown to every op, and the file is never
-  written over.
+  written over. A level that has neither file nor seed, when the host loads it (the first `level.load` of its name), is **held empty**
+  from then on (nothing is written for it until something is put in it), so that a player can drop an object in a field nothing was
+  ever made in; it is forgotten by `level.unload`. A level the host never announced (a group level) stays unknown, and a drop in it is
+  refused (wave 5 integration; docs/mud-phase3.md section 3 rule 8).
 - **Paging.** The objects that were not shown yet are the pages' list (`Level.Snapshot`); a page holds at most 64 `npc.place`
   effects and as many as fit in the frame; the cursor is the index of the next one (an int). A cursor that is not an int in
   `0..count` is `bad_args`; a cursor for a level that is not held, or that has no load running, gives `{more: false, cursor: nil}`.

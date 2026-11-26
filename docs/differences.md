@@ -307,3 +307,7 @@ functions").
 - **`mudobjectattr`** is Alpaxis's: the scripts show the attribute names and the call forms only. `weight` and `value` are of one
   piece, `name` is what the window shows, an archetype is read as one object made of it.
 - **`SpellLevel`** is a new member of `CrossfireHost` (like `SpellName`): the level of `spells[]`, 0 until the spell phase.
+- **A level that the host loaded is held, empty if it has no file and no seed** (wave 5 integration). The protocol says that a level the
+  extension knows nothing of gives no effects; the extension still takes the first `level.load` of a name as the host's announcement of
+  that level, so that `muddropinvobject` can place an object in a level where nothing has ever been made. Without it, the first drop in
+  every level that has no seed was refused ("You can't drop that here."). Nothing is written for such a level until it holds an object.
