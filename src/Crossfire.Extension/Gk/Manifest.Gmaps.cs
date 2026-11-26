@@ -7,7 +7,7 @@ namespace Crossfire.Extension;
 
 internal static partial class Manifest
 {
-    /// <summary>The functions, types and events of lane 4G; <paramref name="b"/> refuses an id outside <see cref="Lane.Gmaps"/>.</summary>
+    /// <summary>The functions, types and events of lane 4G: none (gmaps are operation 17 and parts of the dispatcher, docs/extension.md "Gmaps"); <paramref name="b"/> refuses an id outside <see cref="Lane.Gmaps"/>.</summary>
     private static void RegisterGmaps(ManifestBuilder b)
     {
     }

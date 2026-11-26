@@ -55,6 +55,17 @@ Graal Kingdoms' `mudlevels` files are Crossfire's map format with these differen
 - **Merging.** `insert_ob_in_ob` merges what can merge (`CAN_MERGE`): two identical nested objects of a seed become one with a larger
   `nrof`, as in C.
 
+## Gmaps (the extension, not the port)
+
+The rules of protocol 1.1 section 7.1 are the extension's own (docs/extension.md, "Gmaps"). Where the protocol leaves a choice, Alpaxis chose:
+
+- **The level an `npc.pos` row or a `player.pos` answer names, for a script on a gmap with a layout.** The position is translated into the
+  gmap's tiles, and the level is the gmap's name, so that the level and the position a script reads belong together (a script on a gmap
+  counts every position in the gmap's tiles). The protocol says only that the position is translated.
+- **A refused `gmap.layout` forgets the gmap's earlier layout** (the text says the extension "keeps no layout of that gmap").
+- **Names are level keys**: a segment's name and the gmap's own name are folded to lower case, and every level name the extension sends
+  is in that form.
+
 ## Language and runtime
 
 - **Strings.** The C code shares strings through `common/shstr.c` (`add_string`, `free_string`, `add_refcount`) and compares them by

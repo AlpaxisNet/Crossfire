@@ -876,3 +876,40 @@ reads the file (a new player when there is none). The equipment hooks of a load 
 
 **The manifest.** The builder lets a type of the core hold the members and methods of every lane, each in its own range.
 
+## Gmaps (wave 4, lane 4G; protocol 1.1 section 7.1)
+
+Crossfire has no gmaps: this is the extension's own rule (`Gk/Gmaps.cs`, `Dispatcher.Gmaps.cs`; `HostQueries.cs` for the queries). Below
+1.1 none of it applies: op 17 is `unknown_op`, no layout is ever kept, and a gmap's name is a level name as in 1.0.
+
+- **`gmap.layout`** (op 17, 1.1 only) keeps one layout per gmap in the dispatcher, that is per connection (a new connection starts
+  with none). Sent again, it replaces the layout and moves nothing. `bad_args` for what 7.1 lists (count and types of the arguments, a
+  name that is not a non-empty string, `width`, `height` or `width * height` over 4,096 or below 1, `size` below 1, a segment that is
+  not a string, a non-empty segment repeated in any ASCII case); **a refused request also forgets the layout the gmap had**, so that the
+  name is a level name again ("keeps no layout of that gmap"). Names are kept as level keys (ASCII lower case).
+- **Resolving** (`GmapLayout.TryResolve`): column `floor(x / size)`, row `floor(y / size)`, the segment `segments[column + row * width]`,
+  the position `(x - column * size, y - row * size)`; outside the grid, NaN or infinite, or an empty cell is no segment.
+  `Dispatcher.ResolvePlace(level, x, y)` is the hook for everything that names a level with a position: it returns a `Placement`
+  (the level key, the position in it, the layout or null), or null for no segment. **The wave 5 drops call it** with the script's
+  `ctx.level` and refuse the drop on null. A name without a layout is a level's: key and position as given.
+- **Makers.** `mudaddobject`, `mudaddspecialobject` and `cloneMudObject` resolve `ctx.level` with the position the call gave (a NaN or
+  an infinity as it came, not as the 0 that `AsNumber` makes of it). On a gmap the object is made in the segment's level with the
+  local position, so it is saved with the segment (`levels/<segment>.map`), comes back from its `level.load` and goes with its
+  `level.unload`. A position in no segment makes nothing, sends nothing, answers nil and logs a line. `cloneMudObject` on a script
+  of a gmap with a layout puts the clone in the segment of the position it was given (the cap of objects counts that segment's);
+  on a segment or a level it stays in the object's level as before. A position that `objects.blobs` brings from the host is kept as
+  sent (it is in the tiles of the NPC's own level): the object stays with the segment it was placed in.
+- **Queries** (`HostQueries`). The extension had never asked the host anything; the worker now sends a QUERY from inside a request and waits
+  for the QRESULT, which the reader thread hands over (one outstanding, `qid` from 1; a QRESULT for a query never sent is a protocol
+  error, one that comes after the extension gave up is dropped; no answer within `ExtensionOptions.QueryTimeout`, 10 s, is
+  `internal`; the connection ending is `unavailable`). `Dispatcher.QuerySource` is the hook; tests set it. A query that fails gives
+  the host's status and text to the operation that asked. The calls, all on the dispatcher and for the lanes that need them:
+  - `NearObjects(level, x, y, r)` is `level.near`. For a gmap with a layout it asks every segment whose square the circle touches
+    (edge included) **and every other loaded segment of the gmap that holds an object**, in cell order, with the centre in the
+    segment's tiles, drops a handle seen twice, translates each row into the gmap's tiles, sorts nearest first (equal distances stay
+    in cell order) and keeps 1,000. A negative radius is `[]` without a query; a NaN or infinite centre is `bad_args`. For any
+    other name it passes the host's rows on.
+  - `NpcPositions(scriptLevel, handles)` is `npc.pos`, `PlayerPosition(scriptLevel, account)` is `player.pos`: for a script on a gmap
+    with a layout a row or answer that names a segment of it is in the gmap's tiles and **names the gmap** (see differences.md); anything
+    else is as the host said.
+  - `LevelBlocked(level, x, y)` asks the one segment of the position (a position in no segment is blocked); `LevelLoadedAt(level, x, y)`
+    the segment of the position (no segment: false); `LevelLoaded(name)` a segment or level name.

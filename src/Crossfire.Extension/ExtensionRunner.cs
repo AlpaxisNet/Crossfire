@@ -158,11 +158,13 @@ internal static class ExtensionRunner
         var queue = new BlockingCollection<Queued>();
         using var stopping = new CancellationTokenSource();
         var dispatcher = new Dispatcher(host, maxFrame, Log, options, counters, stopping.Token, manifest);
+        var queries = new HostQueries(writer, stopping.Token, options.QueryTimeout);
+        dispatcher.QuerySource = queries.Ask;
         var worker = new Thread(() => Work(queue, dispatcher, writer, state, counters, options)) { IsBackground = true, Name = "crossfire-worker" };
         worker.Start();
 
         var counting = new ReadCountingStream(stream);
-        int exit = Read(counting, maxFrame, writer, queue, state, counters, Log);
+        int exit = Read(counting, maxFrame, writer, queue, state, counters, Log, queries);
 
         // EOF or a protocol error: the state is saved (unless session.shutdown said false), then the process ends (protocol section 1)
         stopping.Cancel();
@@ -178,7 +180,7 @@ internal static class ExtensionRunner
     }
 
     /// <summary>The reader thread X: it always reads, answers PING at once and hands requests to the worker.</summary>
-    private static int Read(ReadCountingStream stream, int maxFrame, FrameWriter writer, BlockingCollection<Queued> queue, LinkState state, Counters counters, Action<int, string> log)
+    private static int Read(ReadCountingStream stream, int maxFrame, FrameWriter writer, BlockingCollection<Queued> queue, LinkState state, Counters counters, Action<int, string> log, HostQueries queries)
     {
         ulong nextReqId = 1;
         long before = stream.BytesRead;
@@ -206,6 +208,12 @@ internal static class ExtensionRunner
                         break;
                     case PongFrame:
                         break; // the extension sends no PING in this version: a PONG it did not send is ignored
+                    case QResultFrame result:
+                        if (!queries.Deliver(result))
+                        {
+                            throw new ProtocolException("a QRESULT for a query that was never sent");
+                        }
+                        break;
                     case ReqFrame req:
                         if (state.ShutdownReplied)
                         {
