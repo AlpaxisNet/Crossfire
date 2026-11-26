@@ -242,7 +242,8 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Fail(Status.TooLarge, e.Message);
         }
-        List<LevelObject> live = page.Items.Where(o => !o.Dead).ToList();
+        // an object that left the level since the snapshot (adopted into a pack by a pick up) is not placed: its page may come later
+        List<LevelObject> live = page.Items.Where(o => !o.Dead && o.Level == level).ToList();
         List<Val> places = live.Select(PlaceEffect).ToList();
         foreach (LevelObject lo in live)
         {

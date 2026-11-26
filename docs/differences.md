@@ -287,12 +287,30 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
 - **`usekeys` is `key_inventory` for every player** (C's default, which a player gets when his object is made; the command and the
   saved setting are not ported). A key in a sack of his pack is not used: "The X in your Y vibrates as you approach the door", with no
   colour (`NDI_BROWN` is not carried by `DrawInfo`). The message says "the door" for a locked container too, as C does.
-- **Nothing closes an open container when the player walks away** (C's `FLAG_WALK_OFF` sets it up; the host moves the player, not this
-  world), and the `EVENT_CLOSE` of the plugins is not run. A container on the ground opened here stays open (and its `applied`, `walk_off`
-  and `fly_off` are in the level file) until closed, until the player logs out, or until its level unloads or a script destroys it (both close it first, `CloseOpenOn`); after a restart the level object is "applied" with nobody
-  holding it open, which `esrv_apply_container` handles as C does (it is cleared and set again by the next open).
+- **Walking away from an open container closes nothing, and C does not either.** C at 8b7ee7f90 does not close a container when its
+  player moves off: `remove_ob` (common/object.c) clears `container` of the players on a square only when the container itself
+  leaves it, and `pick_up` puts into the open container wherever it is (server/c_object.c, "container is open, so use it"), as
+  `drop` does (`put_object_in_sack`, no position is asked). So a drop after walking away still goes into the container, here too
+  (`ContainerTests`, "Mud_drop_Given_a_sack_on_the_ground_open_and_the_player_far_from_it"). What is not ported is the machinery that
+  sets this up (`FLAG_WALK_OFF`, `move_apply`: the host moves the player, not this world) and the `EVENT_CLOSE` of the plugins. A
+  container on the ground opened here stays open (and its `applied`, `walk_off` and `fly_off` are in the level file) until it is
+  closed, until the player logs out, or until it goes: a level that unloads and a script that destroys it close it first
+  (`CloseOpenOn`, with C's "You close ..."), and another player who picks it up takes it from him quietly (below). After a restart the
+  level object is "applied" with nobody holding it open, which `esrv_apply_container` handles as C does (it is cleared and set again by
+  the next open).
+- **The open container itself** (wave 7, as C's `pick_up`, `drop_object`, `put_object_in_sack` and `remove_ob` have it). *Picked up*
+  while it is open on the ground: `pick_up` asks `sack_can_hold(op, op->container, tmp)` with the container the object itself, and C
+  answers "You can't put the X into itself."; nothing changes. *Picked up by another player*: `remove_ob` clears his `container` and
+  the object's `applied` without a word; here `Dispatcher.RemoveObFromMap` does it for every player who has the object open (C does
+  it for the players on its square, which this world does not know). *Dropped* from the pack with `muddropinvobject` (the commands
+  cannot: `drop` puts into the open container, and into itself it does nothing): `drop_object` unapplies it first ("You unapply X
+  (open).") and C's `remove_ob` of an inventory object leaves `op->container`, so the player still has it as his container, not
+  applied, lying on the ground; his next drop says "The X is not active." until he applies it again (it opens). `mud_container` then
+  names the proxy tag of the object on the ground, which stays the same from one request to the next (the sweep of the flush does not
+  take it). *Given away* (`mudmoveinvobject` into another sack): an empty one is unapplied and stays his container, as above; one that
+  holds objects is not moved, its contents are (C's "Eneq" branch, above).
 - **A container on the ground has no item string and no `findinvobjectbyid` id.** Its tag is the one of its proxy, shown in
-  `mud_container` and accepted by `mudmoveinvobject`. A container that is picked up whole while it is open keeps `op->container`: close it first.
+  `mud_container` and accepted by `mudmoveinvobject`.
 - **`apply_container`** (the version of C for a player without a client window) is not ported; see porting.md.
 
 ## The inventory functions (`Gk/Inventory.cs`, `Dispatcher.Wave5B.cs`; lane 5B of phase 3)
@@ -435,3 +453,44 @@ C's arithmetic (golden values: `tests/Crossfire.Extension.Tests/golden/consumabl
   to level.
 - **The trap of a chest** (C springs a `RUNE` found in it) is not ported (traps are phase 4).
 - **Types 160 (furniture) and 161 (house doors)** answer "You can't apply that." (housing is not phase 3). C has no such types.
+
+## Commands (`Gk/Command.cs`, `Gk/HelpCommand.cs`, `Dispatcher.Wave7A.cs`; lane 7A of phase 3)
+
+The table of `mudcommand` stands in for C's `parse_string` and `find_command` (server/commands.c). What differs:
+
+- **Which commands exist.** `drop`, `dropall`, `take` (and `get`, C's other name for it), `mark`, `save`, `title`, `peaceful`, `brace`,
+  `fix_me` (and Graal Kingdoms' `fixme`), `verbose`, `who`, `tell` and `help`. `useskill`, `readyskill`, `party`, `blood`, `search`, `cast`
+  and `invoke` are phase 4; every other word, the wizard commands of C (`dm` and the rest) and the ones that Graal Kingdoms' scripts
+  keep for themselves, gets C's "Unknown command.  Try help.". `apply`, `examine` and `inventory` are ported (`Apply.CommandApply`,
+  `Examine.CommandExamine`) but no script and no key binding of Graal Kingdoms passes them, so they are not in the table. C's plugin
+  commands, its short forms and its repeat flag do not exist here.
+- **The parse.** As `parse_string`: the word up to the first space is the command, in lower case, and the rest without its leading
+  spaces is the text. The function takes the two as `(cmd, params)`; a `cmd` that has its text in it is split the same way; an empty
+  text is no text (C's `NULL`; Graal Kingdoms trims its text before the call, and `mudcommand("dropall", "")` means none).
+- **`who`** lists the players that this extension has logged in, by name, not C's list in the order of logins, and a line is
+  `<name> the <title> P` or `W` (C: `<name> the <title> (@<host>) [<map>]<wizard><idle><P|W>`: the host does not tell the extension a
+  player's address or his map, nobody is a wizard, and the tick that sets `idle` is not here).
+- **`tell`** reaches the players of this extension, which are all the players of the server. C's `last_tell` and `reply` are not ported.
+  The message the other player gets is cut to `MAX_BUF` as C cuts it.
+- **`title`**: `own_title` is kept in memory and is lost at logout (C saves it in the player's file; the account file here is the
+  player's object, whose `title` line is the object title that Graal Kingdoms reads as `mudtitle`). The default title is the name of
+  the player's archetype, which is what C's login copies.
+- **`peaceful`** toggles Graal Kingdoms' member `peaceful` (the account's line `mudpeaceful`), which is saved with the account. C
+  starts every player peaceful; a new account here starts as the member's default, not peaceful.
+- **`verbose`** is C's `command_listen` ("Your verbose level is now %d.", c_misc.c) and sets `mudverbose`, the level that Graal
+  Kingdoms' `sendMessage` compares with a message's own. C keeps the level in a `char`; the member is a number from -128 to 127 now
+  (wave 3 declared it a bool, which could not hold the level 5 and 10 that Graal Kingdoms compares). C's word "listen" stays in the
+  text for no number: "Set listen to what (presently %d)?". Graal Kingdoms' name for the command comes from the notes of its
+  chat bar (players.md 5.10), not from a script.
+- **`save`** writes the account now (`SubmitAccount`, the writer's pass at once) and says "You have been saved."; "SAVE FAILED!" when
+  the account has no usable file name or was unloaded (its file is kept). C's refusals, "You can not save on unholy ground" and
+  "You don't deserve to save yet." (no experience), are not ported: the first needs a map, and the second would stop a new player
+  from saving.
+- **`mark`** with a text of digits only marks the item of the player's own top level whose `mudid` that is (the Item-Menu sends
+  `#s(item)`, which is the id as text); a number that is no such item says "Could not find an object that matches <number>" and does not
+  look for a name. Any other text is `command_mark`.
+- **`help`** reads Crossfire's `lib/def_help` and `lib/help/*` at 8b7ee7f90, embedded in the extension unchanged (the texts describe
+  Crossfire's own client: `bind`, `mouse`, `range` and the like). Not ported: `clear_win_info` (a client packet), the folder
+  `lib/mischelp` (it does not exist at that commit: `help topics` prints its heading and no names, as C does when the folder is
+  missing) and `lib/wizhelp` (nobody is a wizard). `help topics` lists the names in the order of their letters, C in the order the
+  directory has; `help commands` lists this table and `tell`, not C's.

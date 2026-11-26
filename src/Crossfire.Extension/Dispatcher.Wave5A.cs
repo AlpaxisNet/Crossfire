@@ -42,6 +42,27 @@ internal sealed partial class Dispatcher
         effects.Add(Val.Map(("k", Val.Str("npc.remove")), ("handle", Val.Handle(handles.HandleOf(ground)))));
         ground.Level.Objects.Remove(ground);
         ground.Level.Dirty = true;
+        ForgetOpenOn(ground.Ob);
+    }
+
+    /// <summary>
+    /// The part of C's <c>remove_ob</c> (common/object.c) for an object that leaves a map: a player who has it open ("If a container that
+    /// the player is currently using somehow gets removed ... update the player view") loses it: the object is no longer applied and his
+    /// <c>container</c> is NULL, quietly (no line of text; the strings follow at the flush). C does it for the players on the object's
+    /// square; the extension does not know squares, so it does it for every player who has the object open (docs/differences.md,
+    /// "Containers").
+    /// </summary>
+    private void ForgetOpenOn(CfObject gone)
+    {
+        foreach (PlayerState ps in players.Values.ToList())
+        {
+            if (ps.Ob.Container == gone)
+            {
+                gone.ClearFlag(Define.FLAG_APPLIED);
+                ps.Ob.Container = null;
+                AskForWholeWindow(ps);
+            }
+        }
     }
 
     /// <summary>

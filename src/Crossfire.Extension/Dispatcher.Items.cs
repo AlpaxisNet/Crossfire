@@ -471,6 +471,12 @@ internal sealed partial class Dispatcher
         {
             SetShown(p, ItemStrings.ContainerName, "");
         }
+        if (open != null && HolderOf(open) == null)
+        {
+            // an open container that is on the ground (opened there, or dropped while it was open: C's drop_object leaves op->container):
+            // the proxy the string names is no item of the tree, and the sweep must not take its tag
+            p.Tracked.Remove(open);
+        }
         SweepTracked(p);
         SweepLoose();
     }

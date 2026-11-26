@@ -171,7 +171,7 @@ internal static partial class TMudPlayerMembers
         b.ExtraStr("mudclass", "mudclass", true, false);
         b.ExtraBool("peaceful", "mudpeaceful", true, false);
         b.ExtraInt("lastdeath", "mudlastdeath", 0, true, false, long.MinValue, long.MaxValue);
-        b.ExtraBool("mudverbose", "mudverbose", true, false);
+        b.ExtraInt("mudverbose", "mudverbose", 0, true, false, sbyte.MinValue, sbyte.MaxValue); // a level, as C's char `listen`; GK compares it with 5 and 10
         b.ExtraInt("levelcap", "mudlevelcap", 0, true, false);
         b.ExtraInt("wccap", "mudwccap", 0, true, false);
         b.ExtraInt("accap", "mudaccap", 0, true, false);
