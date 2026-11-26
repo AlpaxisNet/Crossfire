@@ -79,6 +79,9 @@ internal sealed class PlayerState
 
     public CfObject Ob { get; }
 
+    /// <summary>The player's controller (C <c>contr</c>), set while the player is logged in.</summary>
+    public Gk.Player? Contr => Ob.Contr as Gk.Player;
+
     public bool Dirty { get; set; }
 
     /// <summary>The client strings (the whole flag name, such as <c>clientr.mud_hp</c>) set for this player, in the order they were first set, with their value.</summary>

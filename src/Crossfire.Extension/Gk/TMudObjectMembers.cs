@@ -8,7 +8,7 @@ using Crossfire.Extension.Protocol;
 namespace Crossfire.Extension.Gk;
 
 /// <summary>The type TMudObject: host <c>npc</c>, so its members are on every level NPC that shows an object (protocol 6.2).</summary>
-internal static class TMudObjectMembers
+internal static partial class TMudObjectMembers
 {
     public const int TypeId = 2;
     public const string TypeName = "TMudObject";
@@ -88,17 +88,50 @@ internal static class TMudObjectMembers
         b.Flag("ismudmonster", Define.FLAG_MONSTER, false, true);
         b.Add("ismudobject", "bool", false, true, (_, _) => Val.True, null);
 
-        var methods = new[]
+        var methods = new List<MethodDef>
         {
             new MethodDef(MethodCloneMudObject, "cloneMudObject", new[] { "float", "float" }, "handle:" + TypeName),
             new MethodDef(MethodDestroyMudObject, "destroymudobject", Array.Empty<string>(), "void"),
         };
+        // the lanes' members and methods: each in the range of its lane (Lane.ObjectMembersFirst), in the order of Lane.All
+        Begin(b, Lane.Items);
+        ExtendItems(b, methods);
+        Begin(b, Lane.Start);
+        ExtendStart(b, methods);
+        Begin(b, Lane.Gmaps);
+        ExtendGmaps(b, methods);
+        Begin(b, Lane.Wave5A);
+        ExtendWave5A(b, methods);
+        Begin(b, Lane.Wave5B);
+        ExtendWave5B(b, methods);
+        Begin(b, Lane.Wave5C);
+        ExtendWave5C(b, methods);
+        Begin(b, Lane.Wave5D);
+        ExtendWave5D(b, methods);
         return new MemberTable<LevelObject>(TypeId, TypeName, "npc", b.Members, methods);
     }
+
+    private static void Begin(FieldBuilder<LevelObject> b, Lane lane) => b.UseRange(lane.ObjectMembersFirst, lane.ObjectMembersLast);
+
+    // A lane implements its method in a partial file of its own (Gk/TMudObjectMembers.Items.cs and so on): it adds members with b and
+    // methods to the list, with ids from b.NextMethodId(). A method that is not implemented adds nothing.
+    static partial void ExtendItems(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendStart(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendGmaps(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5A(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5B(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5C(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5D(FieldBuilder<LevelObject> b, List<MethodDef> methods);
 }
 
 /// <summary>The type TMudPlayer: host <c>player</c>, so its members are on the player's object of the host (protocol 6.2).</summary>
-internal static class TMudPlayerMembers
+internal static partial class TMudPlayerMembers
 {
     public const int TypeId = 3;
     public const string TypeName = "TMudPlayer";
@@ -119,6 +152,39 @@ internal static class TMudPlayerMembers
         b.ExtraInt("wccap", "mudwccap", 0, true, false);
         b.ExtraInt("accap", "mudaccap", 0, true, false);
         b.Add("ismudobject", "bool", false, true, (_, _) => Val.True, null);
-        return new MemberTable<PlayerState>(TypeId, TypeName, "player", b.Members, Array.Empty<MethodDef>());
+        var methods = new List<MethodDef>();
+        // the lanes' members and methods of a player: each in the range of its lane (Lane.PlayerMembersFirst)
+        Begin(b, Lane.Items);
+        ExtendItems(b, methods);
+        Begin(b, Lane.Start);
+        ExtendStart(b, methods);
+        Begin(b, Lane.Gmaps);
+        ExtendGmaps(b, methods);
+        Begin(b, Lane.Wave5A);
+        ExtendWave5A(b, methods);
+        Begin(b, Lane.Wave5B);
+        ExtendWave5B(b, methods);
+        Begin(b, Lane.Wave5C);
+        ExtendWave5C(b, methods);
+        Begin(b, Lane.Wave5D);
+        ExtendWave5D(b, methods);
+        return new MemberTable<PlayerState>(TypeId, TypeName, "player", b.Members, methods);
     }
+
+    private static void Begin(FieldBuilder<PlayerState> b, Lane lane) => b.UseRange(lane.PlayerMembersFirst, lane.PlayerMembersLast);
+
+    // As for TMudObject (Gk/TMudPlayerMembers.Items.cs and so on).
+    static partial void ExtendItems(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendStart(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendGmaps(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5A(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5B(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5C(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave5D(FieldBuilder<PlayerState> b, List<MethodDef> methods);
 }

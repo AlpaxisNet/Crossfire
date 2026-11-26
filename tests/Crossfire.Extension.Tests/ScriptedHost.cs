@@ -86,12 +86,12 @@ internal sealed class ScriptedHost : IDisposable
     }
 
     /// <summary>The host's HELLO map of the golden vectors (docs/protocol.md section 13.2) with the given changes.</summary>
-    public static Val HostHello(string worldDir, long epoch = 1, long protoMajor = 1, long maxFrame = 16_777_216, params string[] without)
+    public static Val HostHello(string worldDir, long epoch = 1, long protoMajor = 1, long maxFrame = 16_777_216, long protoMinor = 0, params string[] without)
     {
         var pairs = new List<(string, Val)>
         {
             ("proto_major", Val.Int(protoMajor)),
-            ("proto_minor", Val.Int(0)),
+            ("proto_minor", Val.Int(protoMinor)),
             ("role", Val.Str("gameserver")),
             ("name", Val.Str("Alpaxis GameServer")),
             ("version", Val.Str("1.0")),
