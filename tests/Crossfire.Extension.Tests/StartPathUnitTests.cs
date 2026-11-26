@@ -789,7 +789,7 @@ public sealed class StartPathUnitTests
         // Assert
         Assert.Equal(1, ob.Level);
         Assert.Equal(0, ob.Stats.Exp);
-        Assert.Equal(0, ob.Stats.Ac);
+        Assert.Equal(-2, ob.Stats.Ac); // roll_stats sets 0, then add_exp reaches fix_player: Dex 18 has an armour class bonus of 2 (wave 5D)
         Assert.Equal(0, ob.Stats.Grace);
         Assert.Equal(ob.Stats.Maxhp, ob.Stats.Hp);
         Assert.Equal(ob.Stats.Maxsp, ob.Stats.Sp);

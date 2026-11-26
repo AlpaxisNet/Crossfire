@@ -371,6 +371,10 @@ internal sealed partial class Dispatcher
             p.Reconcile = false;
             p.Shown.ClearMarks();
             FlushWeights(p);
+            if (player.ClientStrings.Count > 0)
+            {
+                RefreshClientStrings(player); // fix_player changes AC, WC, damage, speed and the stats: only what changed is written
+            }
         }
         finally
         {
