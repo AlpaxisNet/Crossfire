@@ -217,6 +217,51 @@ public sealed class LivingTests
     // ------------------------------------------------------------------ fix_player: what the golden harness does not hold
 
     [Fact]
+    public void FixPlayer_Given_potion_effects_When_fixed_Then_a_cursed_one_replaces_the_resistance_and_a_weaker_good_one_does_not_and_the_strongest_good_one_wins()
+    {
+        // Arrange
+        var f = new Fixture();
+        (CfObject ob, _) = f.Player();
+        f.Give(ob, Define.ARMOUR, o => o.Resist[2] = 80, arch: "sword"); // fire 80
+        f.Give(ob, Define.POTION_EFFECT, o => o.Resist[2] = 30, arch: "force"); // weaker: does not count
+        f.Give(ob, Define.POTION_EFFECT, o => { o.Resist[4] = -40; o.Resist[5] = 20; }, arch: "force"); // a cursed one: cold -40
+        f.Give(ob, Define.POTION_EFFECT, o => o.Resist[5] = 35, arch: "force"); // the bigger of two good ones: 35
+        f.Give(ob, Define.POTION, o => o.Resist[6] = 90); // a potion that is not an effect: its resistance is not counted
+        f.Give(ob, Define.POTION_EFFECT, o => o.Resist[7] = 50); // an effect that is not of the archetype force: counted as any item
+        f.Give(ob, Define.POTION_EFFECT, o => o.Resist[7] = 50);
+
+        // Act
+        FixPlayer.Fix(f.World, ob);
+
+        // Assert
+        Assert.Equal(new[] { 80, -40, 35, 0, 75 }, new int[] { ob.Resist[2], ob.Resist[4], ob.Resist[5], ob.Resist[6], ob.Resist[7] });
+    }
+
+    [Fact]
+    public void FixPlayer_Given_three_armours_in_any_order_When_fixed_Then_only_the_best_armour_class_counts()
+    {
+        // Arrange
+        var f = new Fixture();
+        (CfObject up, _) = f.Player();
+        (CfObject down, _) = f.Player();
+        foreach (int ac in new[] { 3, 5, 7 })
+        {
+            f.Give(up, Define.ARMOUR, o => o.Stats.Ac = (sbyte)ac);
+        }
+        foreach (int ac in new[] { 7, 5, 3 })
+        {
+            f.Give(down, Define.ARMOUR, o => o.Stats.Ac = (sbyte)ac);
+        }
+
+        // Act
+        FixPlayer.Fix(f.World, up);
+        FixPlayer.Fix(f.World, down);
+
+        // Assert
+        Assert.Equal(new[] { -7, -7 }, new int[] { up.Stats.Ac, down.Stats.Ac });
+    }
+
+    [Fact]
     public void FixPlayer_Given_a_player_that_was_never_rolled_When_fixed_Then_armour_class_speed_and_resistances_stay_as_they_are()
     {
         // Arrange
