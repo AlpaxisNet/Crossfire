@@ -45,14 +45,17 @@ public sealed partial class ApplyTests
         var counts = new List<long>();
         for (int i = 0; i < 5; i++)
         {
-            results.Add(g.Ext.Call(13, new[] { H(ground), Val.Int(TMudObjectMembers.MethodMudApplyObject), Val.List() }, level: "hall", player: "bob"));
+            // the apply asks the script (the object event) and the host's fallback runs defaultApply
+            ReplyFrame asked = g.Ext.Call(13, new[] { H(ground), Val.Int(TMudObjectMembers.MethodMudApplyObject), Val.List() }, level: "hall", player: "bob");
+            Assert.Equal(new[] { "onApplyItem", "onApply" }, EventNames(asked));
+            results.Add(g.DefaultApply(ground));
             counts.Add(i < 4 ? g.Read(ground, "mudnrof").AsInt : -1);
         }
-        ReplyFrame sixth = g.Ext.Call(13, new[] { H(ground), Val.Int(TMudObjectMembers.MethodMudApplyObject), Val.List() }, level: "hall", player: "bob");
+        ReplyFrame sixth = g.DefaultApply(ground);
 
         // Assert: one is used up each time, the last takes the face with it, and the level is saved without it
         Assert.Equal(new long[] { 4, 3, 2, 1, -1 }, counts);
-        Assert.All(results, r => Assert.True(Result(r)));
+        Assert.All(results, r => Assert.Equal(1L, r.Result.AsInt)); // defaultApply answers manual_apply's 1
         Assert.All(results, r => Assert.Contains("The banana tasted good.", Lines(r)));
         Assert.Equal(1, Effects(results[4], "npc.remove").Count(e => e.Get("handle")!.AsHandle == ground));
         Assert.Empty(Effects(results[0], "npc.remove"));

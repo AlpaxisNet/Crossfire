@@ -129,8 +129,8 @@ internal sealed partial class Dispatcher
 
     private EventDef DeclaredEvent(string name, string target)
     {
-        EventDef? def = manifest.FindEvent(name);
-        if (def == null || def.Target != target)
+        EventDef? def = manifest.FindEvent(name, target);
+        if (def == null)
         {
             throw new InvalidOperationException("the event " + name + " is not registered with the target " + target);
         }

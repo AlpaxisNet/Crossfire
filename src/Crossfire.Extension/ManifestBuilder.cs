@@ -124,7 +124,7 @@ internal sealed class ManifestBuilder
     private readonly HashSet<int> typeIds = new();
     private readonly HashSet<string> typeNames = new(StringComparer.Ordinal);
     private readonly HashSet<long> memberIds = new();
-    private readonly Dictionary<string, EventDef> eventByName = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Name, string Target), EventDef> eventByName = new();
 
     /// <summary>The most rows <c>get_list</c> gives on a 1.1 link: an inventory of 1,000 stacks is one request (docs/mud-phase3.md section 4.2).</summary>
     public const int MaxListOf11 = 1024;
@@ -153,7 +153,10 @@ internal sealed class ManifestBuilder
     public IReadOnlyCollection<string> TypeNames => typeNames;
 
     /// <summary>Every event a lane registered, also one that this link's minor version leaves out of the manifest (<see cref="EventDef.MinMinor"/>).</summary>
-    public EventDef? FindEvent(string name) => eventByName.TryGetValue(name, out EventDef? e) ? e : null;
+    public EventDef? FindEvent(string name) => eventByName.Where(pair => pair.Key.Name == name).Select(pair => pair.Value).FirstOrDefault();
+
+    /// <summary>The event of a name and a target (one name may be declared once for each target: <c>onApply</c> is an item event and an object event), or null.</summary>
+    public EventDef? FindEvent(string name, string target) => eventByName.TryGetValue((name, target), out EventDef? e) ? e : null;
 
     /// <summary>Registers a function; ignored when the link's minor version is below <see cref="FunctionDef.MinMinor"/>.</summary>
     public void AddFunction(Lane lane, FunctionDef f)
@@ -246,9 +249,9 @@ internal sealed class ManifestBuilder
         {
             throw new InvalidOperationException("event " + e.Name + ": target " + e.Target + " or mode " + e.Mode + " is not one of the protocol's");
         }
-        if (eventByName.ContainsKey(e.Name))
+        if (eventByName.ContainsKey((e.Name, e.Target)))
         {
-            throw new InvalidOperationException("event " + e.Name + " is already registered");
+            throw new InvalidOperationException("event " + e.Name + " is already registered with the target " + e.Target);
         }
         if (e.Target == "item" && e.MinMinor < 1)
         {
@@ -258,7 +261,7 @@ internal sealed class ManifestBuilder
         {
             CheckTypeSyntax(p, Math.Max(1, e.MinMinor));
         }
-        eventByName[e.Name] = e;
+        eventByName[(e.Name, e.Target)] = e;
         if (LinkMinor >= e.MinMinor)
         {
             events.Add(e);

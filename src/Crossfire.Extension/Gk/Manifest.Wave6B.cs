@@ -41,6 +41,9 @@ internal static partial class Manifest
         string item = "handle:" + TMudObjectMembers.TypeName;
         b.AddEvent(Lane.Wave6B, new EventDef(EventOnApplyItem, "player", "sync", new[] { item }, MinMinor: 1));
         b.AddEvent(Lane.Wave6B, new EventDef(EventOnApply, "item", "sync", new[] { player }));
+        // the same name for an object a level NPC shows (a chest on the ground): protocol 6 lets one name be declared once for each target,
+        // and Graal Kingdoms' class function is the same one (mudtype_container's onApply checks restrictaccess for both)
+        b.AddEvent(Lane.Wave6B, new EventDef(EventOnApply, "object", "sync", new[] { player }, MinMinor: 1));
         foreach (string hook in new[]
         {
             EventOnWeaponWielded, EventOnWeaponUnWielded, EventOnWandReadied, EventOnWandUnReadied,

@@ -1300,7 +1300,8 @@ differences.md ("Apply and wearing") says where the extension differs. The ids a
 | Event | Target | Mode | Parameters | When |
 | --- | --- | --- | --- | --- |
 | `onApplyItem` | player | sync | `handle:TMudObject` | at the start of `mudapplyinvobject` and its kin, with the item, always (also for an item the apply refuses) |
-| `onApply` | item | sync | `handle:TMudPlayer` | from `manual_apply` (after its checks for unpaid objects): on the item's proxy, `classes` the one class of its type (`mudtype_<name>`, else `mudtype_general`), `args` the player, `fallback` the invoke of `defaultApply` with the player. Not sent on a link of 1.0, for an object on the ground, and for `apply -a` and `apply -u` |
+| `onApply` | item | sync | `handle:TMudPlayer` | from `manual_apply` (after its checks for unpaid objects): on the item's proxy, `classes` the one class of its type (`mudtype_<name>`, else `mudtype_general`), `args` the player, `fallback` the invoke of `defaultApply` with the player. Not sent on a link of 1.0 and for `apply -a` and `apply -u` |
+| `onApply` | object | sync | `handle:TMudPlayer` | the same name for an object that lies on a level (`mudapplyobject`, `apply` of the face), sent to the NPC that shows it (no `classes`: the face has joined its own), `args` the player, `fallback` the invoke of `defaultApply` on the object with the player. Not sent on a link of 1.0 (the switch runs at once) |
 | `onWeaponWielded`, `onWeaponUnWielded` | player | sync | `handle:TMudObject` | after a weapon or a tool is applied or taken off |
 | `onWandReadied`, `onWandUnReadied` | player | sync | `handle:TMudObject` | after a wand is readied or taken off |
 | `onArmorWorn`, `onArmorUnWorn` | player | sync | `handle:TMudObject` | after armour, a helmet, shield, boots, gloves, girdle, bracers, cloak, ring or amulet is put on or taken off |

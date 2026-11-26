@@ -277,10 +277,14 @@ public sealed partial class ApplyTests
 
         // Assert
         Val OfEvent(string name) => manifest.Get("events")!.Items.Single(e => e.Get("name")!.AsString == name);
-        Val onApply = OfEvent("onApply");
+        Val OfEventFor(string name, string target) => manifest.Get("events")!.Items.Single(e => e.Get("name")!.AsString == name && e.Get("target")!.AsString == target);
+        Val onApply = OfEventFor("onApply", "item");
         Assert.Equal("item", onApply.Get("target")!.AsString);
         Assert.Equal("sync", onApply.Get("mode")!.AsString);
         Assert.Equal(new[] { "handle:TMudPlayer" }, onApply.Get("params")!.Items.Select(p => p.AsString));
+        Val onApplyObject = OfEventFor("onApply", "object"); // the same name for an object a level shows: GK's container class checks restrictaccess for both
+        Assert.Equal("sync", onApplyObject.Get("mode")!.AsString);
+        Assert.Equal(new[] { "handle:TMudPlayer" }, onApplyObject.Get("params")!.Items.Select(p => p.AsString));
         Val onApplyItem = OfEvent("onApplyItem");
         Assert.Equal("player", onApplyItem.Get("target")!.AsString);
         Assert.Equal(new[] { "handle:TMudObject" }, onApplyItem.Get("params")!.Items.Select(p => p.AsString));
@@ -1034,20 +1038,42 @@ public sealed partial class ApplyTests
     }
 
     [Fact]
-    public void MudApplyObject_Given_a_sword_on_the_ground_When_applied_Then_you_must_get_it_first_and_no_item_event_is_sent()
+    public void MudApplyObject_Given_a_sword_on_the_ground_When_applied_Then_the_object_event_is_sent_and_its_fallback_says_you_must_get_it_first()
     {
         // Arrange
         using var g = new Game();
         ulong ground = g.Hall()[PickupWorld.Sword];
 
+        // Act: the apply asks the script (the event of the face), and the host's fallback runs defaultApply when no class handles it
+        ReplyFrame r = g.Ext.Call(13, new[] { H(ground), Val.Int(TMudObjectMembers.MethodMudApplyObject), Val.List() }, level: "hall", player: "bob");
+        ReplyFrame fallback = g.DefaultApply(ground);
+
+        // Assert: the hall's sword is an object of the level: C's manual_apply answers 2
+        Assert.True(Result(r));
+        Assert.Equal(new[] { "onApplyItem", "onApply" }, EventNames(r));
+        Assert.Equal(ground, EventOf(r, "onApplyItem").Get("args")!.Items[0].AsHandle); // the level object's own handle: no proxy is made for it
+        Val onApply = EventOf(r, "onApply");
+        Assert.Equal(("object", ground), (onApply.Get("target")!.AsString, onApply.Get("handle")!.AsHandle));
+        Assert.Equal(g.Player, onApply.Get("args")!.Items[0].AsHandle);
+        Assert.Equal(("defaultApply", ground), (onApply.Get("fallback")!.Get("invoke")!.AsString, onApply.Get("fallback")!.Get("handle")!.AsHandle));
+        Assert.False(Result(fallback));
+        Assert.Equal(new[] { "You must get it first!\n" }, Lines(fallback));
+    }
+
+    [Fact]
+    public void MudApplyObject_Given_a_1_0_link_When_a_sword_on_the_ground_is_applied_Then_no_event_is_sent_and_it_answers_at_once_that_it_must_be_got_first()
+    {
+        // Arrange: a link of 1.0 has neither the item event nor the object event of the same name
+        using var g = new Game(protoMinor: 0);
+        ulong ground = g.Hall()[PickupWorld.Sword];
+
         // Act
         ReplyFrame r = g.Ext.Call(13, new[] { H(ground), Val.Int(TMudObjectMembers.MethodMudApplyObject), Val.List() }, level: "hall", player: "bob");
 
-        // Assert: the hall's sword is an object of the level: C's manual_apply answers 2
+        // Assert
+        Assert.Empty(r.Events);
         Assert.False(Result(r));
         Assert.Equal(new[] { "You must get it first!\n" }, Lines(r));
-        Assert.Equal(new[] { "onApplyItem" }, EventNames(r));
-        Assert.Equal(ground, EventOf(r, "onApplyItem").Get("args")!.Items[0].AsHandle); // the level object's own handle: no proxy is made for it
     }
 
     [Fact]

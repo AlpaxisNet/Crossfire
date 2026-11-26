@@ -349,10 +349,13 @@ functions").
   and runs the fallback when the class has none (docs/mud-phase3.md section 4.4). `manual_apply` answers 1 at once: the script decides
   later, in a request of its own. On a link of 1.0 (no item events, no `fallback`) the switch runs at once. `apply -a` and `apply -u`
   (`command_apply`) also run at once: the fallback carries no flag.
-- **An object on the ground has no `onApply` event.** The manifest gives one name one target, and `onApply` is the item's; GK's faces
-  would need it on the NPC (target `object`) as well. `mudapplyobject` of a level object runs `defaultApply` at once (the first line of
-  the object's own `onApply`, for example a restricted chest's, is not asked). This is open: it needs a second event name or a host that
-  runs one event on both targets (reported to the lead).
+- **An object on the ground gets `onApply` as an `object` event (wave 6 integration).** The manifest declares the name `onApply` twice,
+  once for the target `item` and once for the target `object` (protocol section 6: the pair of name and target is unique). `mudapplyobject`
+  and `apply` of a level object send the event to the NPC that shows it, with the player as the argument and the invoke of `defaultApply`
+  on the object as the fallback: the class that the face joined (GK's `showobject` joins `mudtype_container` and `mudtype_food`) decides,
+  as it does for an item, so a restricted chest's `restrictaccess` check runs before the default. A face that joined no class gets the
+  fallback. On a link of 1.0 (neither event) the switch runs at once. The object's own script is the NPC's, so the function of the class
+  has `this` the face; its call `this.defaultApply(pl)` is a request on the object's handle with the player in the argument.
 - **`defaultApply(pl)` says what `player_apply` says.** Its answer is `manual_apply`'s (0, 1 or 2), and for 0 and 2 it says "I don't know
   how to apply the X." and "You must get it first!", which C's `player_apply` says after the switch.
 - **Applies that need code that is not here do not use the object up.** Scrolls, spell books, skill scrolls, rods, horns, skill tools,

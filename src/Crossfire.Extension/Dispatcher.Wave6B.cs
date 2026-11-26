@@ -42,24 +42,33 @@ internal sealed partial class Dispatcher
 
     /// <summary>
     /// The place of C's plugin hook in <c>manual_apply</c>: the script's <c>onApply</c> as an item event on the proxy of
-    /// <paramref name="item"/>, with the invoke of <c>defaultApply</c> as its fallback (the host runs it when no class joined to the
-    /// proxy has the function; the class's own function usually calls it). True when the event was sent: the script decides, and the
-    /// caller does nothing more. False (the caller applies at once) on a link of 1.0, which has no item events, for an object that is
-    /// not in the applier's tree (an object on the ground: the event of a level object has the name of the item's, which the manifest
-    /// gives one target only: docs/differences.md) and for the commands <c>apply -a</c> and <c>apply -u</c> (the fallback carries no
-    /// flag).
+    /// <paramref name="item"/> (an item of the applier's tree), or as an object event on the level NPC of an object that lies on a level
+    /// (the manifest declares the name for both targets), with the invoke of <c>defaultApply</c> as its fallback (the host runs it when no
+    /// class joined to the proxy or the NPC has the function; the class's own function usually calls it). True when the event was sent:
+    /// the script decides, and the caller does nothing more. False (the caller applies at once) on a link of 1.0, which has neither, for an
+    /// object that is neither in the applier's tree nor placed on a level, and for the commands <c>apply -a</c> and <c>apply -u</c> (the
+    /// fallback carries no flag).
     /// </summary>
     internal bool SendApplyEvent(CfObject pl, CfObject item, int aflag)
     {
-        if (!Speaks11 || aflag != 0 || pl.Contr is not Player p || !Holds(pl, item))
+        if (!Speaks11 || aflag != 0 || pl.Contr is not Player p)
         {
             return false;
         }
-        LevelObject proxy = ProxyOf(item);
         var who = new[] { Val.Handle(handles.HandleOf(p.State)) };
-        EmitItemEvent(Manifest.EventOnApply, proxy, TMudObjectMembers.TypeName, new[] { classes.MudTypeClass(item.Type) }, who,
-            InvokeFallback("defaultApply", proxy, who));
-        return true;
+        if (Holds(pl, item))
+        {
+            LevelObject proxy = ProxyOf(item);
+            EmitItemEvent(Manifest.EventOnApply, proxy, TMudObjectMembers.TypeName, new[] { classes.MudTypeClass(item.Type) }, who,
+                InvokeFallback("defaultApply", proxy, who));
+            return true;
+        }
+        if (GroundOf(item) is { Placed: true, Dead: false } ground)
+        {
+            EmitObjectEvent(Manifest.EventOnApply, ground, who, InvokeFallback("defaultApply", ground, who));
+            return true;
+        }
+        return false;
     }
 
     private LevelObject ProxyOf(CfObject item) => HolderOf(item) is { } holder ? TagItem(holder, item) : ItemProxy(item);
