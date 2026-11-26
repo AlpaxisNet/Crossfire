@@ -90,8 +90,6 @@ internal sealed partial class Dispatcher
     internal void AdoptGround(LevelObject ground)
     {
         ground.Level = Level.Inventory;
-        ground.Blob = null;
-        ground.SeedFlags.Clear();
         AdoptLevelObject(ground);
     }
 
@@ -244,8 +242,7 @@ internal sealed partial class Dispatcher
         }
         if (ground)
         {
-            if (!levels.TryGetValue(target.Level.Name, out Level? held) || held != target.Level
-                || target.Ob.QueryFlag(Define.FLAG_NO_PICK) || target.Ob.QueryFlag(Define.FLAG_UNPAID))
+            if (target.Ob.QueryFlag(Define.FLAG_NO_PICK) || target.Ob.QueryFlag(Define.FLAG_UNPAID))
             {
                 return Outcome.Ok(Val.False);
             }

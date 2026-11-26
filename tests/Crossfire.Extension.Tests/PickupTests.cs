@@ -29,6 +29,8 @@ internal static class PickupWorld
         + "Object potion\nname potion\nname_pl potions\nface potion.1\ntype 5\nweight 10\nend\n"
         + "Object helmet\nname helmet\nface helmet.1\ntype 34\nweight 500\nend\n"
         + "Object arrow\nname arrow\nname_pl arrows\nface arrow.1\ntype 13\nweight 5\nend\n"
+        + "Object gem\nname gem\nname_pl gems\nface gem.1\ntype 60\nweight 5\nend\n"
+        + "Object key\nname key\nface key.2\ntype 24\nweight 5\nend\n"
         + "Object mist\nname mist\nface mist.1\nweight 10\ninvisible 1\nend\n"
         + "Object shaman\nname shaman\nface shaman.1\ntype 122\nweight 1\nrace fruit\nend\n";
 
@@ -44,6 +46,12 @@ internal static class PickupWorld
         + "arch relic\nx 3\ny 4\nend\n"
         + "arch feather\nx 3\ny 4\nend\n"
         + "arch sword\nx 9\ny 9\nend\n";
+
+    /// <summary>A level with a sack that holds an anvil (read when a call names it).</summary>
+    public const string VaultSeed = "arch map\nname vault\nwidth 8\nheight 8\nend\narch sack\nx 1\ny 1\narch anvil\nend\nend\n";
+
+    /// <summary>A level the host has not been shown yet: its sword is no NPC.</summary>
+    public const string PendingSeed = "arch map\nname pending\nwidth 8\nheight 8\nend\narch sword\nx 2\ny 2\nend\n";
 
     public const int Banana = 0;
     public const int Sword = 1;
@@ -131,6 +139,8 @@ internal static class PickupWorld
         }
         Directory.CreateDirectory(Path.Combine(world.Path, "mudlevels"));
         File.WriteAllText(Path.Combine(world.Path, "mudlevels", "hall"), HallSeed);
+        File.WriteAllText(Path.Combine(world.Path, "mudlevels", "vault"), VaultSeed);
+        File.WriteAllText(Path.Combine(world.Path, "mudlevels", "pending"), PendingSeed);
         ItemWorld.Account(world, account, header, inventory);
         return world;
     }
@@ -548,6 +558,7 @@ public sealed class PickupTests
         Assert.True(Result(r));
         Assert.Empty(g.Items(bag, player: false));
         Assert.Equal(6L, g.Read(g.Items(g.Player).Single(i => i.Name == "banana").Handle, "mudnrof").AsInt); // 4 and 2
+        Assert.True(g.Ext.Dispatcher.ControllerOf("bob")!.State.Dirty); // the account alone changed: it is saved after the quiet time
     }
 
     [Fact]
@@ -581,6 +592,7 @@ public sealed class PickupTests
         // Arrange
         using var g = new Game();
         ulong stack = g.Items(g.Player).Single(i => i.Name == "banana").Handle;
+        int tags = g.Ext.Dispatcher.LiveItemTags;
 
         // Act
         ReplyFrame r = g.Drop(stack, 6.5, 7.25, 0);
@@ -599,6 +611,7 @@ public sealed class PickupTests
         Assert.DoesNotContain(g.Items(g.Player), i => i.Handle == stack);
         Assert.Equal(4L, g.Read(stack, "mudnrof").AsInt); // a proxy held before the drop still reads the object
         Assert.Equal(new[] { "bag" }, g.Items(g.Player).Select(i => i.Name));
+        Assert.Equal(tags - 1, g.Ext.Dispatcher.LiveItemTags); // a face on the ground is no item any more
     }
 
     [Fact]
@@ -1400,8 +1413,8 @@ public sealed class PickupTests
         Assert.Single(Effects(r, "npc.place"));
     }
 
-    private static ulong Made(Game g, string arch, double x, double y) =>
-        Ok(g.Ext.Call(Manifest.OpMudAddObject, new[] { N(x), N(y), S(arch) }, level: "hall", player: "bob"));
+    private static ulong Made(Game g, string arch, double x, double y, string level = "hall") =>
+        Ok(g.Ext.Call(Manifest.OpMudAddObject, new[] { N(x), N(y), S(arch) }, level: level, player: "bob"));
 
     [Fact]
     public void CommandTake_Given_objects_on_the_square_When_taken_without_parameters_Then_the_last_placed_that_can_be_picked_up_is_taken_and_the_rest_stay()
@@ -1727,8 +1740,8 @@ public sealed class PickupTests
         // Arrange: the host gave the object its script state
         using var g = new Game(inventory: "");
         ulong sword = g.Hall[PickupWorld.Sword];
-        Assert.Equal(0UL, g.Ext.Call(16, new[] { Val.List(Val.List(H(sword), N(3), N(4), S("state of the npc"))) }, level: "hall").Status);
         Assert.True(Result(g.Pick(sword, 1)));
+        Assert.Equal(0UL, g.Ext.Call(16, new[] { Val.List(Val.List(H(sword), N(3), N(4), S("state of the npc"))) }, level: "hall").Status);
 
         // Act
         ReplyFrame r = g.Drop(sword, 2, 2, 0);
@@ -1767,6 +1780,150 @@ public sealed class PickupTests
         // Assert
         Assert.Equal(new[] { "You can't drop that here." }, Lines(r));
         Assert.Single(g.Items(g.Player));
+    }
+
+    [Fact]
+    public void PickUp_Given_a_sack_with_a_heavy_content_When_picked_up_Then_the_weight_of_the_contents_counts()
+    {
+        // Arrange: the sack weighs 200 g and holds an anvil of 500,000 g
+        using var g = new Game(inventory: "");
+        ulong sack = Say.LoadAll(g.Ext, "vault").Places.Single().Get("handle")!.AsHandle;
+
+        // Act
+        ReplyFrame r = g.Ext.Call(13, new[] { H(sack), Val.Int(TMudObjectMembers.MethodMudPickUpObject), Val.List(Val.Int(1)) }, level: "vault", player: "bob");
+
+        // Assert
+        Assert.False(Result(r));
+        Assert.Equal(new[] { "That item is too heavy for you to put it in your inventory." }, Lines(r));
+    }
+
+    [Fact]
+    public void PickUp_Given_an_item_in_an_open_container_When_picked_up_Then_it_goes_into_the_pack_not_back_into_the_container()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch sack\napplied 1\narch banana\nend\nend\n");
+        ulong sack = g.Items(g.Player).Single().Handle;
+        ulong inside = g.Items(sack, player: false).Single().Handle;
+        g.Ext.Call(ItemWorld.OpDo, new[] { S("open"), S("bob"), Val.Int((uint)sack) }, player: "bob");
+
+        // Act
+        ReplyFrame r = g.Pick(inside, 0);
+
+        // Assert
+        Assert.True(Result(r));
+        Assert.Empty(g.Items(sack, player: false));
+        Assert.Contains(g.Items(g.Player), i => i.Handle == inside);
+    }
+
+    [Fact]
+    public void CommandTake_Given_a_name_When_taken_Then_only_what_matches_goes_and_an_invisible_object_is_never_taken()
+    {
+        // Arrange
+        using var g = new Game(inventory: "");
+        ulong mist = Made(g, "mist", 3.5, 4.5);
+        Feet(g);
+
+        // Act
+        ReplyFrame banana = g.Command("take", "banana");
+        ReplyFrame invisible = g.Command("take", "mist");
+
+        // Assert
+        Assert.Equal(g.Hall[PickupWorld.Banana], Assert.Single(Effects(banana, "npc.remove")).Get("handle")!.AsHandle);
+        Assert.Empty(Effects(invisible, "npc.remove"));
+        Assert.Equal("mist", g.Read(mist, "mudrealname").AsString);
+    }
+
+    [Fact]
+    public void CommandTake_Given_an_object_that_no_level_load_has_shown_When_taken_Then_it_is_not_on_the_square()
+    {
+        // Arrange: the level "pending" is read for a maker, its sword is not an NPC yet
+        using var g = new Game(inventory: "");
+        Made(g, "banana", 5, 5, "pending");
+        FakeHost host = Feet(g, "pending", 2.5, 2.5);
+
+        // Act
+        ReplyFrame r = g.Command("take", null, level: "pending");
+
+        // Assert
+        Assert.Equal(new[] { "Nothing to take!" }, Lines(r));
+        Assert.Empty(Effects(r, "npc.remove"));
+        Assert.Single(host.Asked);
+    }
+
+    [Fact]
+    public void CommandTake_Given_a_player_on_the_same_column_but_another_row_When_taken_Then_nothing_is_there()
+    {
+        // Arrange: the hall's objects stand on (3, 4)
+        using var g = new Game(inventory: "");
+        Feet(g, x: 3.5, y: 7.5);
+
+        // Act
+        ReplyFrame r = g.Command("take", null);
+
+        // Assert
+        Assert.Equal(new[] { "Nothing to take!" }, Lines(r));
+    }
+
+    [Fact]
+    public void CommandDropAll_Given_an_object_of_a_kind_it_keeps_at_the_head_of_the_pack_When_run_Then_that_object_stays()
+    {
+        // Arrange: money, keys, gems, food, an invisible object, a locked sword and an open sack, each in front of a ring that goes (with a container open every drop goes to put_object_in_sack, which is wave 6's: no ring goes to the ground then)
+        foreach (string kept in new[] { "goldcoin", "key", "gem", "banana", "mist", "sack", "sword" })
+        {
+            string extra = kept == "sword" ? "inv_locked 1\n" : kept == "sack" ? "applied 1\n" : "";
+            using var g = new Game(inventory: "arch " + kept + "\n" + extra + "end\narch ring\nend\n");
+            Feet(g);
+            if (kept == "sack")
+            {
+                g.Ext.Call(ItemWorld.OpDo, new[] { S("open"), S("bob"), Val.Int((uint)g.Items(g.Player).Single(i => i.Name.StartsWith("sack", StringComparison.Ordinal)).Handle) }, player: "bob");
+            }
+
+            // Act
+            ReplyFrame r = g.Command("dropall", null);
+
+            // Assert
+            Assert.Equal(0UL, r.Status);
+            Assert.True((kept == "sack" ? Array.Empty<string>() : new[] { "ring" }).SequenceEqual(Effects(r, "npc.place").Select(p => g.Read(p.Get("handle")!.AsHandle, "mudrealname").AsString)), kept);
+            Assert.True(Lines(r).Count == 0, kept + ": " + string.Join("|", Lines(r))); // nothing said about what stayed
+        }
+    }
+
+    [Fact]
+    public void CommandDropAll_Given_an_applied_ring_When_misc_is_dropped_and_apply_works_Then_the_applied_one_stays()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch ring\napplied 1\nend\narch ring\nend\n");
+        Feet(g);
+        g.Ext.Dispatcher.ApplySpecialUnapply = (op, tmp) =>
+        {
+            tmp.ClearFlag(Define.FLAG_APPLIED);
+            return 0;
+        };
+
+        // Act
+        ReplyFrame r = g.Command("dropall", "misc");
+
+        // Assert
+        Assert.Single(Effects(r, "npc.place"));
+        Assert.Single(g.Items(g.Player));
+    }
+
+    [Fact]
+    public void Drop_Given_a_count_the_player_typed_When_drop_is_called_Then_that_many_go_and_the_count_is_forgotten()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch banana\nnrof 5\nend\n");
+        ulong stack = g.Items(g.Player).Single().Handle;
+        Player contr = g.Ext.Dispatcher.ControllerOf("bob")!;
+        contr.Count = 2;
+
+        // Act
+        ReplyFrame r = g.Direct("top", (uint)stack);
+
+        // Assert
+        Assert.True(Result(r));
+        Assert.Equal(3L, g.Read(stack, "mudnrof").AsInt);
+        Assert.Equal(0u, contr.Count);
     }
 
     // ------------------------------------------------------------------ sack_can_hold

@@ -98,10 +98,6 @@ internal sealed partial class Pickup
         }
 
         long have = tmp.Nrof != 0 ? tmp.Nrof : 1;
-        if (nrof < 0)
-        {
-            return false;
-        }
         if (nrof > have)
         {
             // get_split_ob's own text, also for an object that is not a stack (C would split one off an object of nrof 0 and fail)
