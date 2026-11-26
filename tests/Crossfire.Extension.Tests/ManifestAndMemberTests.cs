@@ -86,13 +86,37 @@ public class ManifestAndMemberTests
                 AssertName(m.Get("name")!.AsString);
                 AssertTypeName(m.Get("type")!.AsString, typeNames, isReturn: false);
                 Assert.Contains(m.Get("access")!.AsString, new[] { "r", "rw" });
-                Assert.Equal(ValKind.True, m.Get("stable")!.Kind);
+                Assert.Contains(m.Get("stable")!.Kind, new[] { ValKind.True, ValKind.False });
+                if (t.Get("name")!.AsString == "TMudArch")
+                {
+                    Assert.Equal(ValKind.True, m.Get("stable")!.Kind);
+                    Assert.Equal("r", m.Get("access")!.AsString);
+                }
             }
             Assert.Equal(memberNames.Distinct(StringComparer.OrdinalIgnoreCase).Count(), memberNames.Count);
-            Assert.Empty(t.Get("methods")!.Items);
+            var methodNames = new List<string>();
+            foreach (Val m in t.Get("methods")!.Items)
+            {
+                ids.Add(m.Get("id")!.AsInt);
+                methodNames.Add(m.Get("name")!.AsString);
+                AssertName(m.Get("name")!.AsString);
+                foreach (Val p in m.Get("params")!.Items)
+                {
+                    AssertTypeName(p.AsString, typeNames, isReturn: false);
+                }
+                AssertTypeName(m.Get("ret")!.AsString, typeNames, isReturn: true);
+            }
+            Assert.Equal(memberNames.Concat(methodNames).Distinct(StringComparer.OrdinalIgnoreCase).Count(), memberNames.Count + methodNames.Count);
         }
         Assert.All(ids, id => Assert.InRange(id, 1, int.MaxValue));
         Assert.Equal(ids.Distinct().Count(), ids.Count);
+        Assert.Equal(new[] { "TMudArch", "TMudObject", "TMudPlayer" }, typeNames);
+        Assert.Equal(new[] { "object", "npc", "player" }, types.Select(t => t.Get("host")!.AsString));
+        var events = manifest.Get("events")!.Items;
+        Assert.Equal(events.Select(e => e.Get("name")!.AsString).Distinct().Count(), events.Count);
+        Assert.All(events, e => AssertName(e.Get("name")!.AsString));
+        Assert.All(events, e => Assert.Contains(e.Get("target")!.AsString, new[] { "object", "player", "global" }));
+        Assert.All(events, e => Assert.Contains(e.Get("mode")!.AsString, new[] { "sync", "deferred" }));
         Assert.Equal(256L, manifest.Get("limits")!.Get("max_list")!.AsInt);
         Assert.Equal(ValKind.False, manifest.Get("wants_tick")!.Kind);
     }
@@ -135,16 +159,19 @@ public class ManifestAndMemberTests
     }
 
     [Fact]
-    public void Build_Given_the_two_functions_When_read_Then_the_ids_names_and_types_of_the_task()
+    public void Build_Given_the_four_functions_When_read_Then_the_ids_names_and_types_of_the_task()
     {
         // Arrange / Act
         var fs = Manifest.Build().Get("functions")!.Items;
 
         // Assert
-        Assert.Equal(new[] { 64L, 65L }, fs.Select(f => f.Get("id")!.AsInt));
-        Assert.Equal(new[] { "findarchetype", "findarchetypebyrealname" }, fs.Select(f => f.Get("name")!.AsString));
-        Assert.All(fs, f => Assert.Equal("handle:TMudArch", f.Get("ret")!.AsString));
-        Assert.All(fs, f => Assert.Equal(new[] { "string" }, f.Get("params")!.Items.Select(p => p.AsString)));
+        Assert.Equal(new[] { 64L, 65L, 66L, 67L }, fs.Select(f => f.Get("id")!.AsInt));
+        Assert.Equal(new[] { "findarchetype", "findarchetypebyrealname", "mudaddobject", "mudaddspecialobject" }, fs.Select(f => f.Get("name")!.AsString));
+        Assert.All(fs.Take(2), f => Assert.Equal("handle:TMudArch", f.Get("ret")!.AsString));
+        Assert.All(fs.Take(2), f => Assert.Equal(new[] { "string" }, f.Get("params")!.Items.Select(p => p.AsString)));
+        Assert.All(fs.Skip(2), f => Assert.Equal("handle:TMudObject", f.Get("ret")!.AsString));
+        Assert.Equal(new[] { "float", "float", "string" }, fs[2].Get("params")!.Items.Select(p => p.AsString));
+        Assert.Equal(new[] { "float", "float", "int", "string", "string" }, fs[3].Get("params")!.Items.Select(p => p.AsString));
     }
 
     [Fact]

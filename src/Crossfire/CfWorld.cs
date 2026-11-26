@@ -95,6 +95,9 @@ public class CrossfireHost
     /// <summary>object.c <c>insert_ob_in_map</c> (free_object drops the inventory of a destroyed object on its map square).</summary>
     public virtual CfObject? InsertObInMap(CfObject op, IMapHandle map, CfObject? originator, int flag) => op;
 
+    /// <summary>map.c <c>get_map_ob(map, x, y)</c> (map.c load_objects): the bottom object of a square of the map, or null. Default: no map has objects.</summary>
+    public virtual CfObject? GetMapOb(IMapHandle map, int x, int y) => null;
+
     /// <summary>object.c <c>update_object</c> (update_turn_face).</summary>
     public virtual void UpdateObject(CfObject op, int action)
     {

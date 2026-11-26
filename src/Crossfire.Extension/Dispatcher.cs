@@ -1,5 +1,6 @@
 // Not ported from a Crossfire file: the operations of the Crossfire extension (docs/protocol.md section 7). Everything here runs on
-// the worker thread W only: the CfWorld has no locks.
+// the worker thread W only: the CfWorld has no locks. The operations are in the partial files Dispatcher.*.cs: this one holds the
+// session, the handles and the members, Dispatcher.Levels.cs the levels and their objects, Dispatcher.Accounts.cs the players.
 //
 // This file is part of the Crossfire extension and is under the GNU General Public License, version 2 or (at your option) any later
 // version (see LICENSE).
@@ -51,10 +52,13 @@ internal sealed class ExtensionOptions
 
     /// <summary>The source of the wall-clock times written to the state file.</summary>
     public TimeProvider Time { get; init; } = TimeProvider.System;
+
+    /// <summary>The settings of the Graal Kingdoms adaptation (class prefixes, the default class, the cap of objects per level).</summary>
+    public GkSettings Gk { get; init; } = new();
 }
 
 /// <summary>The worker side: one request at a time, in the order they arrive.</summary>
-internal sealed class Dispatcher
+internal sealed partial class Dispatcher : IMemberEnv
 {
     private readonly HostHello host;
     private readonly Action<int, string> log;
@@ -64,15 +68,26 @@ internal sealed class Dispatcher
     private readonly CancellationToken stopping;
     private readonly SessionState session;
     private readonly HostClock clock = new();
+    private readonly HandleTable handles;
     private DataLock? dataLock;
     private FileWriter? writer;
     private bool saveOnExit = true;
     private bool savedAtShutdown;
 
-    private readonly Dictionary<Archetype, uint> tagOf = new();
-    private readonly List<Archetype> archByTag = new();
     private CfWorld? world;
+    private GkHost? gk;
+    private GkClasses classes;
     private int archetypeCount;
+
+    // what a request collects for its REPLY (protocol sections 10 and 11) and the context it came with (section 4.2)
+    private readonly List<Val> effects = new();
+    private readonly List<Val> events = new();
+    private string? ctxLevel;
+    private string? ctxPlayer;
+
+    // the world's error lines forwarded to the host's log (the first few of each request, and only for level and account work)
+    private bool forwardWorldLog;
+    private int worldErrorLines;
 
     public Dispatcher(HostHello host, int maxFrame, Action<int, string> log, ExtensionOptions options, Counters counters, CancellationToken stopping = default)
     {
@@ -83,29 +98,49 @@ internal sealed class Dispatcher
         this.log = log;
         this.options = options;
         this.counters = counters;
+        handles = new HandleTable(host.Epoch, options.TagLimit);
+        classes = GkClasses.Of(Array.Empty<string>(), options.Gk);
     }
 
     /// <summary>True after the REPLY to <c>session.init</c> was made with status 0.</summary>
     public bool Initialized { get; private set; }
 
+    CfWorld IMemberEnv.World => world!;
+
+    ulong IMemberEnv.HandleOf(object target) => handles.HandleOf(target);
+
+    uint IMemberEnv.TagOf(object target) => handles.TagOf(target);
+
     /// <summary>The REPLY to a REQ. A reply that would not fit in the link's maximum becomes <c>too_large</c> (section 4.2).</summary>
     public ReplyFrame Handle(ReqFrame req)
     {
         counters.CountRequest();
-        // The releases (req.Releases) are handles of objects the host no longer refers to. Every handle this extension has given out
-        // names an archetype, and archetypes are permanent: there is nothing to forget, and dead or unknown handles are ignored.
+        // The releases (req.Releases) are handles of objects the host no longer refers to. Every handle this extension gives out names an
+        // archetype (permanent), an object in a level (never released: protocol section 5) or a logged-in player: there is nothing to
+        // forget, and dead or unknown handles are ignored.
+        effects.Clear();
+        events.Clear();
+        worldErrorLines = 0;
+        ctxLevel = req.Ctx.Get("level") is { Kind: ValKind.String } l ? l.AsString : null;
+        ctxPlayer = req.Ctx.Get("player") is { Kind: ValKind.String } p ? p.AsString : null;
         Outcome outcome;
         try
         {
             options.BeforeOperation?.Invoke(req.Op);
             outcome = Dispatch(req);
         }
+        catch (TagsUsedUpException)
+        {
+            outcome = Outcome.Fail(Status.Internal, "the tags of this epoch are used up");
+        }
         catch (Exception e)
         {
             log(0, "request " + req.ReqId + " (op " + req.Op + ") failed: " + e.GetType().Name + ": " + e.Message);
             outcome = Outcome.Fail(Status.Internal, "internal error");
         }
-        ReplyFrame reply = Reply(req.ReqId, outcome);
+        ReplyFrame reply = outcome.Status == Status.Ok
+            ? new ReplyFrame(req.ReqId, (ulong)outcome.Status, outcome.Result, effects.ToArray(), events.ToArray())
+            : new ReplyFrame(req.ReqId, (ulong)outcome.Status, outcome.Result, Array.Empty<Val>(), Array.Empty<Val>());
         if (outcome.Status != Status.Ok)
         {
             counters.CountError();
@@ -113,13 +148,10 @@ internal sealed class Dispatcher
         else if (FrameCodec.Encode(reply).Length - 4 > maxFrame)
         {
             counters.CountError();
-            reply = Reply(req.ReqId, Outcome.Fail(Status.TooLarge, "the answer does not fit in a frame"));
+            reply = new ReplyFrame(req.ReqId, (ulong)Status.TooLarge, Val.Str("the answer does not fit in a frame"), Array.Empty<Val>(), Array.Empty<Val>());
         }
         return reply;
     }
-
-    private static ReplyFrame Reply(ulong reqid, Outcome o) =>
-        new(reqid, (ulong)o.Status, o.Result, Array.Empty<Val>(), Array.Empty<Val>());
 
     private Outcome Dispatch(ReqFrame req)
     {
@@ -139,6 +171,14 @@ internal sealed class Dispatcher
                 return Flush(req.Args);
             case 4:
                 return Shutdown(req.Args);
+            case 5:
+                return PlayerLogin(req.Args);
+            case 6:
+                return PlayerLogout(req.Args);
+            case 7:
+                return LevelLoad(req.Args);
+            case 8:
+                return LevelUnload(req.Args);
             case 9:
                 return Get(req.Args);
             case 10:
@@ -149,20 +189,35 @@ internal sealed class Dispatcher
                 return GetList(req.Args);
             case 13:
                 return Invoke(req.Args);
+            case 14:
+                return ObjectDestroyed(req.Args);
             case 15:
                 return req.Args.Count == 0 ? Outcome.Ok(Stats()) : Outcome.Fail(Status.BadArgs, "stats takes no arguments");
+            case 16:
+                return ObjectsBlobs(req.Args);
             case Manifest.OpFindArchetype:
                 return FindArchetype(req.Args, byRealName: false);
             case Manifest.OpFindArchetypeByRealName:
                 return FindArchetype(req.Args, byRealName: true);
+            case Manifest.OpMudAddObject:
+                return MudAddObject(req.Args);
+            case Manifest.OpMudAddSpecialObject:
+                return MudAddSpecialObject(req.Args);
             default:
-                // 2 without wants_tick (the host must not send it), 5 to 8, 14 and 16 (players, levels, objects: later waves),
-                // 17 to 63 (reserved) and the manifest's other ids
+                // 2 without wants_tick (the host must not send it), 17 to 63 (reserved) and the manifest's other ids
                 return Outcome.Fail(Status.UnknownOp, "unknown operation " + req.Op);
         }
     }
 
     // ------------------------------------------------------------------ session
+
+    private void WorldLog(LogLevel level, string message)
+    {
+        if (forwardWorldLog && level == LogLevel.Error && worldErrorLines++ < 5)
+        {
+            log(1, "crossfire: " + message.TrimEnd('\n'));
+        }
+    }
 
     private Outcome Init(IReadOnlyList<Val> args)
     {
@@ -192,7 +247,8 @@ internal sealed class Dispatcher
         {
             return Outcome.Fail(Status.Internal, "the world has no Arch folder");
         }
-        var w = new CfWorld(new GkHost(), (_, _) => { });
+        gk = new GkHost();
+        var w = new CfWorld(gk, WorldLog);
         ArchCollection collection = ArchCollector.Collect(arch);
         w.InitArchetypes(collection.Archetypes);
 
@@ -209,11 +265,13 @@ internal sealed class Dispatcher
         world = w;
         archetypeCount = count;
         session.Archetypes = count;
+        classes = GkClasses.Read(host.WorldDir, options.Gk);
         session.MarkInitialized();
         Initialized = true;
         SubmitSnapshot("init");
         log(2, "loaded " + count + " archetypes (" + parts + " of them parts) from " + collection.Files.Count + " files; "
-            + w.LogCounts[(int)LogLevel.Error] + " errors in the data, " + collection.Warnings.Count + " warnings of the collector");
+            + w.LogCounts[(int)LogLevel.Error] + " errors in the data, " + collection.Warnings.Count + " warnings of the collector; "
+            + classes.Count + " script classes");
         return Outcome.Ok(Val.Map(("archetypes", Val.Int(count))));
     }
 
@@ -265,9 +323,26 @@ internal sealed class Dispatcher
         return Outcome.Ok(Val.Nil);
     }
 
-    /// <summary>Gives the file writer a snapshot of everything this process holds (worker only; the writer gets bytes it alone owns).</summary>
-    private void SubmitSnapshot(string reason) =>
+    /// <summary>
+    /// Gives the file writer a snapshot of everything this process holds (worker only; the writer gets bytes it alone owns): the
+    /// state file, every level that changed since it was read or saved, and every logged-in account.
+    /// </summary>
+    private void SubmitSnapshot(string reason)
+    {
         writer!.Submit(SessionState.FileName, session.Snapshot(reason, host.Epoch, host.ServerName, counters, clock));
+        if (world == null)
+        {
+            return;
+        }
+        foreach (Level level in levels.Values.Where(l => l.Dirty).ToList())
+        {
+            SubmitLevel(level);
+        }
+        foreach (PlayerState player in players.Values.ToList())
+        {
+            SubmitAccount(player);
+        }
+    }
 
     /// <summary>
     /// The end of the connection (protocol section 1, "Stopping"): saves unless <c>session.shutdown</c> with false came before, and
@@ -305,50 +380,14 @@ internal sealed class Dispatcher
     {
         List<(string, Val)> pairs = counters.ToPairs();
         pairs.Add(("archetypes", Val.Int(archetypeCount)));
-        pairs.Add(("tags", Val.Int(archByTag.Count)));
+        pairs.Add(("tags", Val.Int(handles.Issued)));
         pairs.Add(("ticks", Val.Int(session.Ticks)));
         pairs.Add(("last_tick_ms", Val.Int(clock.LastTickMs)));
         pairs.Add(("flushes", Val.Int(session.Flushes)));
+        pairs.Add(("levels", Val.Int(levels.Count)));
+        pairs.Add(("level_objects", Val.Int(levels.Values.Sum(l => l.Objects.Count))));
+        pairs.Add(("players", Val.Int(players.Count)));
         return Val.Map(pairs.ToArray());
-    }
-
-    // ------------------------------------------------------------------ handles
-
-    private Val HandleOf(Archetype at)
-    {
-        if (!tagOf.TryGetValue(at, out uint tag))
-        {
-            if ((uint)archByTag.Count >= options.TagLimit)
-            {
-                throw new TagsUsedUpException();
-            }
-            archByTag.Add(at);
-            tag = (uint)archByTag.Count;
-            tagOf[at] = tag;
-        }
-        return Val.Handle(((ulong)host.Epoch << 32) | tag);
-    }
-
-    private sealed class TagsUsedUpException : Exception
-    {
-    }
-
-    /// <summary>The archetype of a handle, or null for a handle that is of another epoch, has tag 0 or a tag never given out.</summary>
-    private Archetype? Resolve(ulong handle)
-    {
-        uint tag = (uint)handle;
-        if ((handle >> 32) != (ulong)host.Epoch || tag == 0 || tag > archByTag.Count)
-        {
-            return null;
-        }
-        return archByTag[(int)tag - 1];
-    }
-
-    private Outcome WithArchetype(Val handleArg, Func<Archetype, Outcome> then)
-    {
-        // nil (and any other value that ArgsShapeOk let through) is a nil handle: bad_handle
-        Archetype? at = handleArg.Kind == ValKind.Handle ? Resolve(handleArg.AsHandle) : null;
-        return at == null ? Outcome.Fail(Status.BadHandle, "dead handle") : then(at);
     }
 
     // ------------------------------------------------------------------ members
@@ -359,14 +398,84 @@ internal sealed class Dispatcher
     private static bool ArgsShapeOk(IReadOnlyList<Val> args, int count, bool handleFirst = true) =>
         args.Count == count && (!handleFirst || args[0].Kind is ValKind.Handle or ValKind.Nil);
 
+    /// <summary>A member of a live target, ready to read and write.</summary>
+    private abstract class Bound
+    {
+        public abstract Val Read();
+
+        public abstract bool Writable { get; }
+
+        public abstract SetResult Write(Val v);
+
+        public virtual string? ClientName => null;
+    }
+
+    private sealed class BoundArch : Bound
+    {
+        private readonly ArchMember member;
+        private readonly Archetype arch;
+        private readonly CfWorld world;
+
+        public BoundArch(ArchMember member, Archetype arch, CfWorld world)
+        {
+            this.member = member;
+            this.arch = arch;
+            this.world = world;
+        }
+
+        public override Val Read() => member.Read(world, arch);
+
+        public override bool Writable => false;
+
+        public override SetResult Write(Val v) => SetResult.Fail("read only");
+    }
+
+    private sealed class BoundMember<T> : Bound
+    {
+        private readonly IMemberEnv env;
+        private readonly T target;
+        private readonly ObjMember<T> member;
+
+        public BoundMember(IMemberEnv env, T target, ObjMember<T> member)
+        {
+            this.env = env;
+            this.target = target;
+            this.member = member;
+        }
+
+        public override Val Read() => member.Read(env, target);
+
+        public override bool Writable => member.Writable && member.Write != null;
+
+        public override SetResult Write(Val v) => member.Write!(env, target, v);
+
+        public override string? ClientName => member.ClientName;
+    }
+
+    /// <summary>The member of that id on a target (an archetype, a level object or a player), or null when the target's type has none.</summary>
+    private Bound? BindMember(object target, long id) => target switch
+    {
+        Archetype at => TMudArchMembers.Find(id) is { } m ? new BoundArch(m, at, world!) : null,
+        LevelObject lo => TMudObjectMembers.Table.Find(id) is { } m ? new BoundMember<LevelObject>(this, lo, m) : null,
+        PlayerState ps => TMudPlayerMembers.Table.Find(id) is { } m ? new BoundMember<PlayerState>(this, ps, m) : null,
+        _ => null,
+    };
+
+    private Outcome WithTarget(Val handleArg, Func<object, Outcome> then)
+    {
+        // nil (and any other value that ArgsShapeOk let through) is a nil handle: bad_handle
+        object? target = handleArg.Kind == ValKind.Handle ? handles.Resolve(handleArg.AsHandle) : null;
+        return target == null ? Outcome.Fail(Status.BadHandle, "dead handle") : then(target);
+    }
+
     private Outcome Get(IReadOnlyList<Val> args)
     {
         if (!ArgsShapeOk(args, 2) || args[1].AsNumberToInt() is not { } id)
         {
             return Outcome.Fail(Status.BadArgs, "get takes a handle and a member id");
         }
-        return WithArchetype(args[0], at =>
-            TMudArchMembers.Find(id) is { } m ? Outcome.Ok(m.Read(world!, at)) : Outcome.Fail(Status.BadArgs, "unknown member " + id));
+        return WithTarget(args[0], t =>
+            BindMember(t, id) is { } m ? Outcome.Ok(m.Read()) : Outcome.Fail(Status.BadArgs, "unknown member " + id));
     }
 
     private Outcome GetMany(IReadOnlyList<Val> args)
@@ -384,16 +493,16 @@ internal sealed class Dispatcher
             }
             ids.Add(id);
         }
-        return WithArchetype(args[0], at =>
+        return WithTarget(args[0], t =>
         {
             var values = new List<Val>(ids.Count);
             foreach (long id in ids)
             {
-                if (TMudArchMembers.Find(id) is not { } m)
+                if (BindMember(t, id) is not { } m)
                 {
                     return Outcome.Fail(Status.BadArgs, "unknown member " + id);
                 }
-                values.Add(m.Read(world!, at));
+                values.Add(m.Read());
             }
             return Outcome.Ok(Val.List(values));
         });
@@ -405,9 +514,24 @@ internal sealed class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "set takes a handle, a member id and a value");
         }
-        // every member of TMudArch has access "r"
-        return WithArchetype(args[0], _ => Outcome.Fail(Status.BadArgs,
-            TMudArchMembers.Find(id) == null ? "unknown member " + id : "member " + id + " is read-only"));
+        return WithTarget(args[0], t =>
+        {
+            if (BindMember(t, id) is not { } m)
+            {
+                return Outcome.Fail(Status.BadArgs, "unknown member " + id);
+            }
+            if (!m.Writable)
+            {
+                return Outcome.Fail(Status.BadArgs, "member " + id + " is read-only");
+            }
+            SetResult r = m.Write(args[2]);
+            if (r.Stored is not { } stored)
+            {
+                return Outcome.Fail(Status.BadArgs, r.Error ?? "the value does not fit the member");
+            }
+            AfterSet(t, m, stored);
+            return Outcome.Ok(stored);
+        });
     }
 
     private Outcome GetList(IReadOnlyList<Val> args)
@@ -416,19 +540,20 @@ internal sealed class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "get_list takes a handle, a member id and a list of field ids");
         }
-        // no member of TMudArch has the type list:handle:<type>
-        return WithArchetype(args[0], _ => Outcome.Fail(Status.BadArgs,
-            TMudArchMembers.Find(id) == null ? "unknown member " + id : "member " + id + " is not a list of handles"));
+        // no member of the manifest has the type list:handle:<type> yet (the inventories are a later phase)
+        return WithTarget(args[0], t => Outcome.Fail(Status.BadArgs,
+            BindMember(t, id) == null ? "unknown member " + id : "member " + id + " is not a list of handles"));
     }
 
     private Outcome Invoke(IReadOnlyList<Val> args)
     {
-        if (!ArgsShapeOk(args, 3) || args[1].AsNumberToInt() == null || !IsListOrNil(args[2]))
+        if (!ArgsShapeOk(args, 3) || args[1].AsNumberToInt() is not { } method || !IsListOrNil(args[2]))
         {
             return Outcome.Fail(Status.BadArgs, "invoke takes a handle, a method id and a list");
         }
-        // TMudArch has no methods yet
-        return WithArchetype(args[0], _ => Outcome.Fail(Status.BadArgs, "unknown method"));
+        return WithTarget(args[0], t => t is LevelObject lo
+            ? InvokeOnObject(lo, method, args[2].Items)
+            : Outcome.Fail(Status.BadArgs, "unknown method"));
     }
 
     // ------------------------------------------------------------------ the manifest's functions
@@ -445,13 +570,15 @@ internal sealed class Dispatcher
         {
             return Outcome.Ok(Val.Nil);
         }
-        try
-        {
-            return Outcome.Ok(HandleOf(at));
-        }
-        catch (TagsUsedUpException)
-        {
-            return Outcome.Fail(Status.Internal, "the tags of this epoch are used up");
-        }
+        return Outcome.Ok(Val.Handle(handles.HandleOf(at)));
     }
+
+    /// <summary>The number a value stands for as a script number: an int or a float, nil as 0; null for any other kind.</summary>
+    private static double? AsNumber(Val v) => v.Kind switch
+    {
+        ValKind.Nil => 0,
+        ValKind.Int => v.AsInt,
+        ValKind.Float => double.IsFinite(v.AsFloat) ? v.AsFloat : 0,
+        _ => null,
+    };
 }

@@ -30,16 +30,20 @@ The design, the decisions behind it and the phases are in the Alpaxis Suite's `s
 - `src/Crossfire`: the object model (`CfObject`, `Living`, `Archetype`, `Define`), the world of globals and functions of
   `common/object.c`, `common/arch.c`, `common/loader.l` (`CfWorld`), the `.arc` reader and saver, the animation and face tables, and
   `ArchCollector` (what `lib/collect.pl` does to the archetype folder). Maps, players and their client, treasures and items are not
-  ported: the code calls a `CrossfireHost` where C calls them.
+  ported (`common/map.c`'s map header and object list, `server/player.c`'s `get_player_archetype` are, as far as the object model
+  needs them): the code calls a `CrossfireHost` where C calls the rest.
 - `src/Crossfire.Extension`: the extension itself (the executable `Crossfire.Extension --connect <socket>`): its own codec and link
-  for [docs/protocol.md](docs/protocol.md), the loading of the archetypes and the manifest functions `findarchetype` and
-  `findarchetypebyrealname` with the type `TMudArch`; the Graal Kingdoms adaptation is in its `Gk` folder. What it does and the
-  table of its members: [docs/extension.md](docs/extension.md). Its lifecycle (the flock on `<data_dir>/.lock`, the file writer
+  for [docs/protocol.md](docs/protocol.md), the loading of the archetypes, the functions `findarchetype`, `findarchetypebyrealname`,
+  `mudaddobject` and `mudaddspecialobject`, the types `TMudArch` (an archetype), `TMudObject` (an object in a level, shown by the
+  host as an NPC) and `TMudPlayer` (a logged-in player), the levels (`level.load`, `level.unload`, the level files) and the accounts
+  (`player.login`, `player.logout`, the account files); the Graal Kingdoms adaptation (classes, image, properties) is in its `Gk`
+  folder. What it does and the tables of its members: [docs/extension.md](docs/extension.md). Its lifecycle (the flock on `<data_dir>/.lock`, the file writer
   and the state file, flush, shutdown and the save at the exit, ticks, the counters of `stats`, the paging helpers) is described there too.
   Tests: `tests/Crossfire.Extension.Tests`.
 - `tests/Crossfire.Tests`: xunit tests; two of them read Graal Kingdoms' own archetypes when the environment variable
   `CROSSFIRE_GK_ARCH` names their folder (the `Arch` folder of its world, not part of this repository) and report how many
-  `Object` blocks, unknown keys and errors they find.
+  `Object` blocks, unknown keys and errors they find. The extension's tests also read the world's `mudlevels` and `scripts` folders when
+  `CROSSFIRE_GK_MUDLEVELS` and `CROSSFIRE_GK_SCRIPTS` name them (docs/extension.md, "The GK adaptation").
 - [docs/porting.md](docs/porting.md): the table of every C function and what became of it. [docs/differences.md](docs/differences.md):
   every deliberate difference with its reason.
 

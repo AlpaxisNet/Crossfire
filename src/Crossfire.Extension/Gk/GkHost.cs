@@ -15,7 +15,29 @@ internal sealed class GkHost : CrossfireHost
         "graalnpctype", "graalnpcparam", "flag", "hpbuff", "spbuff", "gracebuff", "castingtime", "restrictaccess", "nopeaceful",
     };
 
-    private static readonly HashSet<string> Keys = new(OwnKeys, StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The keys this extension itself writes into its level and account files, on top of Crossfire's: the position of a level
+    /// object as the host's floats (<c>mudx</c>, <c>mudy</c>), the host's script state (<c>mudblob</c>), the picture a script set
+    /// (<c>mudimg</c>), the two numbers Graal Kingdoms keeps with an object (<c>randomvar</c>, <c>marketprice</c>), the account a
+    /// player file belongs to (<c>account</c>) and the plain state of a player (docs/extension.md, "The level and account files").
+    /// </summary>
+    public static readonly IReadOnlyList<string> StateKeys = new[]
+    {
+        "mudx", "mudy", "mudblob", "mudimg", "randomvar", "marketprice", "account", "mudclass", "mudpeaceful", "mudlastdeath",
+        "mudverbose", "mudlevelcap", "mudwccap", "mudaccap",
+    };
+
+    private static readonly HashSet<string> Keys = new(OwnKeys.Concat(StateKeys), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>While a map file is read: the objects that C's <c>load_objects</c> hands to <c>insert_ob_in_map</c>, in file order (a part of a larger object too).</summary>
+    public List<CfObject>? Collecting { get; set; }
 
     public override bool IsLoaderKey(string key) => Keys.Contains(key);
+
+    /// <summary>The object model has no squares: the objects that a map file loads are collected in file order (the extension's own level index).</summary>
+    public override CfObject? InsertObInMap(CfObject op, IMapHandle map, CfObject? originator, int flag)
+    {
+        Collecting?.Add(op);
+        return op;
+    }
 }

@@ -155,10 +155,11 @@ internal sealed class ScriptedHost : IDisposable
     public static Val NoCtx() => Val.Map(("player", Val.Nil), ("level", Val.Nil));
 
     /// <summary>Sends a REQ with the next reqid without reading its REPLY.</summary>
-    public ulong SendReq(ulong op, IEnumerable<Val>? args = null, IEnumerable<ulong>? releases = null)
+    public ulong SendReq(ulong op, IEnumerable<Val>? args = null, IEnumerable<ulong>? releases = null, string? level = null, string? player = null)
     {
         ulong id = nextReqId++;
-        Send(new ReqFrame(id, op, (releases ?? Array.Empty<ulong>()).ToArray(), NoCtx(), (args ?? Array.Empty<Val>()).ToArray()));
+        Val ctx = Val.Map(("player", player == null ? Val.Nil : Val.Str(player)), ("level", level == null ? Val.Nil : Val.Str(level)));
+        Send(new ReqFrame(id, op, (releases ?? Array.Empty<ulong>()).ToArray(), ctx, (args ?? Array.Empty<Val>()).ToArray()));
         return id;
     }
 
@@ -170,8 +171,8 @@ internal sealed class ScriptedHost : IDisposable
     }
 
     /// <summary>A REQ and its REPLY.</summary>
-    public ReplyFrame Call(ulong op, IEnumerable<Val>? args = null, IEnumerable<ulong>? releases = null) =>
-        ReadReply(SendReq(op, args, releases));
+    public ReplyFrame Call(ulong op, IEnumerable<Val>? args = null, IEnumerable<ulong>? releases = null, string? level = null, string? player = null) =>
+        ReadReply(SendReq(op, args, releases, level, player));
 
     public ReplyFrame Init() => Call(1);
 

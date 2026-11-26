@@ -749,15 +749,9 @@ public class SessionTests
     [Theory]
     [InlineData(0UL)]
     [InlineData(2UL)]
-    [InlineData(5UL)]
-    [InlineData(6UL)]
-    [InlineData(7UL)]
-    [InlineData(8UL)]
-    [InlineData(14UL)]
-    [InlineData(16UL)]
     [InlineData(17UL)]
     [InlineData(63UL)]
-    [InlineData(66UL)]
+    [InlineData(68UL)]
     [InlineData(2147483647UL)]
     public void Request_Given_an_op_the_extension_does_not_have_When_sent_Then_unknown_op(ulong op)
     {
