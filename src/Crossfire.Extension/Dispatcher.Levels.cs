@@ -407,23 +407,44 @@ internal sealed partial class Dispatcher
 
     // ------------------------------------------------------------------ making objects
 
-    /// <summary>The level of the running request (the script's level), or null with a log line.</summary>
-    private Level? RequestLevel(string function)
+    /// <summary>
+    /// The level that holds a place of the running request, or null with a log line. The script's level is <c>ctx.level</c>; when it is
+    /// a gmap that has a layout (protocol section 7.1) the level is the segment that holds (<paramref name="x"/>, <paramref name="y"/>)
+    /// and the position becomes the position in that segment; a position in no segment gives null and nothing is made.
+    /// </summary>
+    private Level? RequestLevel(string function, ref double x, ref double y, Val rawX, Val rawY)
     {
         if (string.IsNullOrEmpty(ctxLevel))
         {
             log(1, function + ": the call has no level");
             return null;
         }
-        Level? level = GetOrReadLevel(ctxLevel);
+        // the position as the call gave it: a NaN or an infinity is no position of a gmap (a level's script reads it as 0, as AsNumber does)
+        if (ResolvePlace(ctxLevel, RawNumber(rawX) ?? x, RawNumber(rawY) ?? y) is not { } place)
+        {
+            log(1, function + ": the position is in no segment of the gmap " + ctxLevel);
+            return null;
+        }
+        if (place.Gmap != null)
+        {
+            x = place.X;
+            y = place.Y;
+        }
+        return LevelForPlacing(function, place.Level);
+    }
+
+    /// <summary>The level of that key for an object to be placed in it: the one held or read, else a new one; null with a log line when it cannot be used.</summary>
+    private Level? LevelForPlacing(string function, string key)
+    {
+        Level? level = GetOrReadLevel(key);
         if (level == null)
         {
-            if (refused.Contains("level:" + ctxLevel) || FileNames.LevelFile(ctxLevel) == null)
+            if (refused.Contains("level:" + key) || FileNames.LevelFile(key) == null)
             {
-                log(1, function + ": level " + ctxLevel + " cannot be used");
+                log(1, function + ": level " + key + " cannot be used");
                 return null;
             }
-            level = NewLevel(ctxLevel);
+            level = NewLevel(key);
         }
         return level;
     }
@@ -487,7 +508,7 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "mudaddobject takes x, y and an archetype name");
         }
-        Level? level = RequestLevel("mudaddobject");
+        Level? level = RequestLevel("mudaddobject", ref x, ref y, args[0], args[1]);
         if (level == null)
         {
             return Outcome.Ok(Val.Nil);
@@ -507,7 +528,7 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "mudaddspecialobject takes x, y, a value, \"<archetype> <rest>\" and a message");
         }
-        Level? level = RequestLevel("mudaddspecialobject");
+        Level? level = RequestLevel("mudaddspecialobject", ref x, ref y, args[0], args[1]);
         if (level == null)
         {
             return Outcome.Ok(Val.Nil);
@@ -549,9 +570,19 @@ internal sealed partial class Dispatcher
                 {
                     return Outcome.Fail(Status.BadArgs, "cloneMudObject takes x and y");
                 }
-                if (lo.Level.Objects.Count >= options.Gk.MaxObjectsPerLevel)
+                // a script on a gmap with a layout places the clone in the segment of its position (protocol section 7.1); else it stays in the object's level
+                Level target = lo.Level;
+                if (!string.IsNullOrEmpty(ctxLevel) && GmapOf(ctxLevel) != null)
                 {
-                    log(1, "cloneMudObject: level " + lo.Level.Name + " holds " + lo.Level.Objects.Count + " objects, the most it may");
+                    if (RequestLevel("cloneMudObject", ref x, ref y, args[0], args[1]) is not { } segment)
+                    {
+                        return Outcome.Ok(Val.Nil);
+                    }
+                    target = segment;
+                }
+                if (target.Objects.Count >= options.Gk.MaxObjectsPerLevel)
+                {
+                    log(1, "cloneMudObject: level " + target.Name + " holds " + target.Objects.Count + " objects, the most it may");
                     return Outcome.Ok(Val.Nil);
                 }
                 // the mud state is copied (fields, the extra lines, the inventory); the script's variables and the host's state are not
@@ -560,7 +591,7 @@ internal sealed partial class Dispatcher
                 {
                     return Outcome.Fail(Status.Internal, "the object cannot be cloned");
                 }
-                LevelObject clone = Attach(lo.Level, copy, x, y);
+                LevelObject clone = Attach(target, copy, x, y);
                 return Outcome.Ok(Place(clone));
             }
             case TMudObjectMembers.MethodDestroyMudObject:

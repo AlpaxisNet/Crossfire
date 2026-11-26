@@ -56,6 +56,9 @@ internal sealed class ExtensionOptions
     /// <summary>The settings of the Graal Kingdoms adaptation (class prefixes, the default class, the cap of objects per level).</summary>
     public GkSettings Gk { get; init; } = new();
 
+    /// <summary>How long the worker waits for the host's answer to a query (protocol section 4.3) before the query fails with <c>internal</c>.</summary>
+    public TimeSpan QueryTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
     /// <summary>A test's registrations in the manifest, after every lane's (functions, types and events that only a test needs).</summary>
     public Action<ManifestBuilder>? ExtraManifest { get; init; }
 
@@ -229,6 +232,8 @@ internal sealed partial class Dispatcher : IMemberEnv
                 return req.Args.Count == 0 ? Outcome.Ok(Stats()) : Outcome.Fail(Status.BadArgs, "stats takes no arguments");
             case 16:
                 return ObjectsBlobs(req.Args);
+            case 17 when Speaks11:
+                return GmapLayoutOp(req.Args);
             case Manifest.OpFindArchetype:
                 return FindArchetype(req.Args, byRealName: false);
             case Manifest.OpFindArchetypeByRealName:
@@ -614,6 +619,9 @@ internal sealed partial class Dispatcher : IMemberEnv
         }
         return Outcome.Ok(Val.Handle(handles.HandleOf(at)));
     }
+
+    /// <summary>A number as the call sent it: a float as it is (NaN and the infinities too); null for any other kind but an int and nil, which is 0.</summary>
+    private static double? RawNumber(Val v) => v.Kind == ValKind.Float ? v.AsFloat : AsNumber(v);
 
     /// <summary>The number a value stands for as a script number: an int or a float, nil as 0; null for any other kind.</summary>
     private static double? AsNumber(Val v) => v.Kind switch
