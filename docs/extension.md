@@ -212,8 +212,8 @@ row that is not is `bad_args` and nothing is applied. A row for a dead, unknown 
 - **Logout.** Saves the account (through the writer), replies with a `client.del` for every string it set, kills the handle and
   frees the player. A player who is not logged in: nil, no effects.
 - **The file**: the player's object as `SaveObject` writes it (the archetype, the differences, the inventory nested, `end`), with the
-  line `account <name>` after the `arch` line, and the plain state of the player as extra lines (`mudclass`, `mudpeaceful`,
-  `mudlastdeath`, `mudverbose`, `mudlevelcap`, `mudwccap`, `mudaccap`). Written at logout, `session.flush`, `session.shutdown` and
+  line `account <name>` after the `arch` line, and the plain state of the player as extra lines (`mudclass`, `mudpeaceful` (absent for a new player, who is peaceful),
+  `mudowntitle`, `mudlastdeath`, `mudverbose`, `mudlevelcap`, `mudwccap`, `mudaccap`). Written at logout, `session.flush`, `session.shutdown` and
   the end of the connection (every logged-in account each time). Inventories, skills and money are phase 3: a block nested in a
   player's file is read and written back as it is.
 
@@ -317,8 +317,8 @@ not read as examine's). The GC: `gc_gen0`, `gc_gen1`, `gc_gen2` (collection coun
 `src/Crossfire.Extension/Gk` holds what is Graal Kingdoms' and not Crossfire's:
 
 - `GkHost` names the nine keys of its archetypes that its server added to the loader (`graalnpctype`, `graalnpcparam`, `flag`,
-  `hpbuff`, `spbuff`, `gracebuff`, `castingtime`, `restrictaccess`, `nopeaceful`) and the fourteen the extension writes into its own
-  files (`mudx`, `mudy`, `mudblob`, `mudimg`, `randomvar`, `marketprice`, `account`, `mudclass`, `mudpeaceful`, `mudlastdeath`,
+  `hpbuff`, `spbuff`, `gracebuff`, `castingtime`, `restrictaccess`, `nopeaceful`) and the fifteen the extension writes into its own
+  files (`mudx`, `mudy`, `mudblob`, `mudimg`, `randomvar`, `marketprice`, `account`, `mudclass`, `mudpeaceful`, `mudowntitle`, `mudlastdeath`,
   `mudverbose`, `mudlevelcap`, `mudwccap`, `mudaccap`), so that the loader keeps those lines in `CfObject.Extra` instead of logging an
   error. It is also the `insert_ob_in_map` of the port's `load_objects`: it collects the objects a level file holds.
 - `TMudArchMembers`, `TMudObjectMembers` and `TMudPlayerMembers` read and write the members of the three types; `Members.cs` is
@@ -672,7 +672,7 @@ last column.
 | `confused` | 536 | bool | rw | no | `FLAG_CONFUSED` | 4.7 table; 5.5 |
 | `blind` | 537 | bool | rw | no | `FLAG_BLIND` | 4.7 table; 5.5 |
 | `mudclass` | 538 | string | rw | no | extra line `mudclass` | players.md 5.9, 5.13: the class's name as text; set by `setmudclass` (phase 3) |
-| `peaceful` | 539 | bool | rw | no | extra line `mudpeaceful` | objects.md 5.4 (TMudPlayer members), players.md 5.6 |
+| `peaceful` | 539 | bool | rw | no | extra line `mudpeaceful` (true when the line is missing or not 0, as C's new player is peaceful) | objects.md 5.4 (TMudPlayer members), players.md 5.6 |
 | `lastdeath` | 540 | int | rw | no | extra line `mudlastdeath` (0 when absent) | objects.md 5.4: a timestamp GK writes |
 | `mudverbose` | 541 | int | rw | no | extra line `mudverbose` (a number from -128 to 127: C's `char`) | players.md 5.13: 16 reads; set by the command `verbose` (wave 7: it was a bool in wave 3) |
 | `levelcap` | 542 | int | rw | no | extra line `mudlevelcap` | players.md 5.9: GK writes it for trial accounts |

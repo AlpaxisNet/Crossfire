@@ -472,11 +472,15 @@ The table of `mudcommand` stands in for C's `parse_string` and `find_command` (s
   player's address or his map, nobody is a wizard, and the tick that sets `idle` is not here).
 - **`tell`** reaches the players of this extension, which are all the players of the server. C's `last_tell` and `reply` are not ported.
   The message the other player gets is cut to `MAX_BUF` as C cuts it.
-- **`title`**: `own_title` is kept in memory and is lost at logout (C saves it in the player's file; the account file here is the
-  player's object, whose `title` line is the object title that Graal Kingdoms reads as `mudtitle`). The default title is the name of
-  the player's archetype, which is what C's login copies.
+- **`title`**: `own_title` is saved, as C saves it (login.c `save_player` writes `title %s` when it is not empty, `check_login` reads
+  it back), but under a line of its own, `mudowntitle`: the account file here is the player's object, whose `title` line is the
+  object title that Graal Kingdoms reads as `mudtitle`, so C's line name cannot be used. The line is absent while the title is
+  empty, and the file format is the extension's own. The default title is the name of the player's archetype, which is what C's
+  login copies.
 - **`peaceful`** toggles Graal Kingdoms' member `peaceful` (the account's line `mudpeaceful`), which is saved with the account. C
-  starts every player peaceful; a new account here starts as the member's default, not peaceful.
+  starts every player peaceful (`get_player` sets `peaceful=1`) and `check_login` keeps that when the file has no `peaceful` line;
+  so does the extension: a new account writes no `mudpeaceful` line, a missing line means peaceful, and only `mudpeaceful 0`
+  (written once the player toggles to attack) is not.
 - **`verbose`** is C's `command_listen` ("Your verbose level is now %d.", c_misc.c) and sets `mudverbose`, the level that Graal
   Kingdoms' `sendMessage` compares with a message's own. C keeps the level in a `char`; the member is a number from -128 to 127 now
   (wave 3 declared it a bool, which could not hold the level 5 and 10 that Graal Kingdoms compares). C's word "listen" stays in the

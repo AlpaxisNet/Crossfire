@@ -52,7 +52,7 @@ public abstract class AccountTests
         Assert.True(Get(ext, h, Ply("ismudobject")).AsBool);
         Assert.Equal((long)(uint)h, Get(ext, h, Ply("mudid")).AsInt);
         Assert.Equal("", Get(ext, h, Ply("mudclass")).AsString);
-        Assert.False(Get(ext, h, Ply("peaceful")).AsBool);
+        Assert.True(Get(ext, h, Ply("peaceful")).AsBool);
         Assert.Equal(0L, Get(ext, h, Ply("lastdeath")).AsInt);
     }
 
@@ -255,7 +255,7 @@ public abstract class AccountTests
         ulong first = Login(ext, "bob").Result.AsHandle;
         Set(ext, first, Ply("mudhp"), Val.Int(4));
         Set(ext, first, Ply("mudclass"), S("warrior_class"));
-        Set(ext, first, Ply("peaceful"), Val.True);
+        Set(ext, first, Ply("peaceful"), Val.False);
         Set(ext, first, Ply("lastdeath"), Val.Int(1524297788));
         Set(ext, first, Ply("levelcap"), Val.Int(25));
         Set(ext, first, Ply("mudrace"), S("dwarf"));
@@ -269,7 +269,7 @@ public abstract class AccountTests
         Assert.NotEqual(first, second);
         Assert.Equal(4L, Get(ext, second, Ply("mudhp")).AsInt);
         Assert.Equal("warrior_class", Get(ext, second, Ply("mudclass")).AsString);
-        Assert.True(Get(ext, second, Ply("peaceful")).AsBool);
+        Assert.False(Get(ext, second, Ply("peaceful")).AsBool);
         Assert.Equal(1524297788L, Get(ext, second, Ply("lastdeath")).AsInt);
         Assert.Equal(25L, Get(ext, second, Ply("levelcap")).AsInt);
         Assert.Equal("dwarf", Get(ext, second, Ply("mudrace")).AsString);

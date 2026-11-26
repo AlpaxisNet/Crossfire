@@ -213,7 +213,7 @@ public sealed class CommandTests
 
         // Assert
         Assert.Equal(new[] { "Your title is 'Boss'." }, trailingSpace); // the text after the space is empty: no parameters
-        Assert.Equal(new[] { "Players:", "bob the human W" }, upper);
+        Assert.Equal(new[] { "Players:", "bob the human P" }, upper);
         Assert.Empty(inOne);
         Assert.Equal(new[] { "Your title is 'Boss'." }, read);
         Assert.Equal(new[] { "Your title is 'Boss'." }, emptyParams); // an empty text is no parameters
@@ -278,7 +278,7 @@ public sealed class CommandTests
 
         // Assert
         Assert.Empty(r.Events);
-        Assert.Equal(new[] { "Players:", "bob the human W" }, Effects(r, "client.text").Select(e => e.Get("text")!.AsString));
+        Assert.Equal(new[] { "Players:", "bob the human P" }, Effects(r, "client.text").Select(e => e.Get("text")!.AsString));
         Assert.Equal(new[] { "Unknown command.  Try help." }, Effects(unknown, "client.text").Select(e => e.Get("text")!.AsString));
     }
 
@@ -373,7 +373,7 @@ public sealed class CommandTests
     {
         // Arrange
         using var g = new Game();
-        Assert.False(g.Read(g.Player, "peaceful").AsBool);
+        Assert.True(g.Read(g.Player, "peaceful").AsBool);
 
         // Act
         List<string> first = g.Lines("peaceful");
@@ -382,10 +382,10 @@ public sealed class CommandTests
         bool afterSecond = g.Read(g.Player, "peaceful").AsBool;
 
         // Assert
-        Assert.Equal(new[] { "You will not attack other players." }, first);
-        Assert.True(afterFirst);
-        Assert.Equal(new[] { "You will attack other players." }, second);
-        Assert.False(afterSecond);
+        Assert.Equal(new[] { "You will attack other players." }, first);
+        Assert.False(afterFirst);
+        Assert.Equal(new[] { "You will not attack other players." }, second);
+        Assert.True(afterSecond);
     }
 
     [Fact]
@@ -396,10 +396,44 @@ public sealed class CommandTests
 
         // Act
         g.Lines("peaceful");
-        string file = Flushed(g.Ext, "accounts/bob.txt", t => t.Contains("mudpeaceful 1", StringComparison.Ordinal));
+        string file = Flushed(g.Ext, "accounts/bob.txt", t => t.Contains("mudpeaceful 0", StringComparison.Ordinal));
 
         // Assert
-        Assert.Contains("mudpeaceful 1", file);
+        Assert.Contains("mudpeaceful 0", file);
+    }
+
+    [Fact]
+    public void Peaceful_Given_a_new_player_When_read_and_listed_Then_he_is_peaceful_as_C_get_player_makes_him()
+    {
+        // Arrange
+        using var g = new Game();
+        g.Login("amy");
+
+        // Act
+        bool member = g.Read(g.Player, "peaceful").AsBool;
+        List<string> lines = g.Lines("who");
+
+        // Assert
+        Assert.True(member);
+        Assert.Equal(new[] { "Players:", "amy the human P", "bob the human P" }, lines);
+    }
+
+    [Fact]
+    public void Peaceful_Given_an_account_file_with_mudpeaceful_0_When_the_player_logs_in_Then_he_is_not_peaceful_and_who_says_W()
+    {
+        // Arrange
+        using var g = new Game();
+        g.Lines("peaceful"); // mudpeaceful 0
+        g.Ext.Call(6, new[] { S("bob") });
+        g.Login("bob");
+
+        // Act
+        bool member = g.Read(g.Login("bob"), "peaceful").AsBool;
+        List<string> lines = g.Lines("who");
+
+        // Assert
+        Assert.False(member);
+        Assert.Equal(new[] { "Players:", "bob the human W" }, lines);
     }
 
     [Theory]
@@ -559,7 +593,7 @@ public sealed class CommandTests
         using var g = new Game();
         g.Login("amy");
         g.Lines("title", "the Bold", "amy");
-        g.Lines("peaceful", null, "bob");
+        g.Lines("peaceful", null, "amy");
 
         // Act
         List<string> lines = g.Lines("who");
@@ -786,7 +820,7 @@ public sealed class CommandTests
         List<string> lines = g.Lines("who");
 
         // Assert
-        Assert.Equal(new[] { "Players:", "bob the human W" }, lines);
+        Assert.Equal(new[] { "Players:", "bob the human P" }, lines);
     }
 
     [Fact]

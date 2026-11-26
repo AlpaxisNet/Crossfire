@@ -7,8 +7,26 @@ namespace Crossfire.Extension.Gk;
 
 internal sealed partial class Player
 {
-    /// <summary>C <c>own_title</c>: the title the player gave himself with the command <c>title</c> ("" for none). Not saved (docs/differences.md, "Commands").</summary>
-    public string OwnTitle { get; set; } = "";
+    /// <summary>The account's line that holds <see cref="OwnTitle"/> (the line <c>title</c> is the object's title, which Graal Kingdoms reads as <c>mudtitle</c>).</summary>
+    public const string OwnTitleKey = "mudowntitle";
+
+    /// <summary>C <c>own_title</c>: the title the player gave himself with the command <c>title</c> ("" for none). Kept as the extra line <see cref="OwnTitleKey"/> of the player's object, so the account file saves it (login.c save_player writes <c>title</c>, check_login reads it) and an unload and load keeps it.</summary>
+    public string OwnTitle
+    {
+        get => State.Ob.Extra?.Get(OwnTitleKey) ?? "";
+        set
+        {
+            if (value.Length == 0)
+            {
+                State.Ob.Extra?.Remove(OwnTitleKey);
+            }
+            else
+            {
+                (State.Ob.Extra ??= new ExtraKeys()).Set(OwnTitleKey, value);
+            }
+            State.Dirty = true;
+        }
+    }
 
     /// <summary>C <c>title</c>: the name of the player's archetype (login.c copies <c>arch-&gt;clone.name</c>), cut to <c>MAX_NAME</c> - 1 characters.</summary>
     public string Title
