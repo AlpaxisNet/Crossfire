@@ -837,7 +837,7 @@ short name, the picture, the type, the quantity (`nrof`), the weight of the whol
 weight and `carrying`) and `clientr.mud_weight_lim` (`weight_limit[Str]`) follow in each flush; `clientr.mud_container` is
 `<id>,<name>,<picture>` of the container in `ob->container`, the empty text when it was closed. At most 3,800 items are shown (the request
 carries at most 4,096 effects); a log line says so once. The names are in `PlayerState.ClientOrder`, so `player.logout` deletes them.
-`ExtensionOptions.FlushHook`, a test's stand-in, replaces this flush.
+`ExtensionOptions.FlushHook`, a test's stand-in, replaces this flush. When the player's strings were sent at login, the flush ends with the strings of the stats and life (`RefreshClientStrings`: the 22 of players.md 3.2 and `mud_ac`, `mud_wc`, `mud_dam`, `mud_speed`): only those whose text changed are written, so a `fix_player` that changed the armour class or the speed shows at the end of the request.
 
 ### Lines of text
 
@@ -898,7 +898,7 @@ another one: Alpaxis's choice, so that choosing again does not give the first it
 (`type` 37); the player gets the experience objects it lacks (`init_player_exp`); `give_initial_items` makes the class's `randomitems`
 list into the tree with `GT_STARTEQUIP | GT_ONLY_GOOD`; `link_player_skills`; `fix_player`. `mudclass` becomes the name without the
 trailing `_class` (Alpaxis's choice: GK's own script copies `clientr.class`, which has no suffix, with `setmudclassnoaction`).
-The tags of what was freed die at once (`ReleaseItemTags`, `KillItem`) and the controller is told to look at the whole window (`Reconcile`), so that the flush of the same request deletes the strings of what left and sets those of what came. The stat bonuses of the class (`add_statbonus`) are wave 5D's.
+The tags of what was freed die at once (`ReleaseItemTags`, `KillItem`) and the controller is told to look at the whole window (`Reconcile`), so that the flush of the same request deletes the strings of what left and sets those of what came. `add_statbonus` and `remove_statbonus` are ported (`LivingChange`), but `setmudclass` does not call them: Graal Kingdoms' class is an object in the player's tree whose stats `fix_player` adds, not a player archetype (docs/extension.md, "The living core").
 
 **The accounts' file and the rolled values.** `orig_stats`, `levhp`, `levsp` and `levgrace` of `struct pl` are kept on the player's
 object as the lines `mudorigstats` (`Str Dex Con Wis Cha Int Pow`), `mudlevhp`, `mudlevsp` and `mudlevgrace` (the values of levels 1
@@ -915,6 +915,35 @@ account's file (neither by a save, a snapshot nor the logout) until the account 
 reads the file (a new player when there is none). The equipment hooks of a load are wave 7B's.
 
 **The manifest.** The builder lets a type of the core hold the members and methods of every lane, each in its own range.
+
+## The living core (lane 5D)
+
+`FixPlayer.Fix` is now the whole of living.c `fix_player` for a player whose stats were rolled (porting.md lists what is left out). Its
+results are on the object (`Stats.Ac`, `Wc`, `Dam`, `Luck`, `Speed`, `Resist[]`, `Attacktype`, the spell paths, `GlowRadius`, `Slaying`,
+`CurrentWeapon`, the flags the applied items give) and on the controller (`Player.Digestion`, `GenHp`, `GenSp`, `GenGrace`,
+`GenSpArmour`, `Encumbrance`, `WeaponSp`; `Braced` and `Searching` are inputs). The host answers `PlayerDigestion` and the other
+regeneration questions of `describe_monster` from them (`GkHost.Living.cs`). The strings `clientr.mud_ac`, `mud_wc`, `mud_dam` and
+`mud_speed` are the members `mudac`, `mudwc`, `muddamage` and `mudspeed` (same prefix as the 22 stats); the flush writes the ones whose
+text changed (above).
+
+**Entry points for wave 6** (all in the extension's `Gk` folder, none of them registered as a script function):
+
+| Name | C | What it does |
+| --- | --- | --- |
+| `FixPlayer.Fix(world, op)` | `fix_player(op)` | recomputes everything above from the applied items. `GkHost.FixPlayer` (the hook of every insert and remove) calls it |
+| `LivingChange.ChangeAbil(world, op, item)` | `change_abil(op, item)` | call it **after** `FLAG_APPLIED` of `item` is set (apply: flag 1) or cleared (take off: -1), and after `SkillTable.CheckSkillToApply`. It takes the attack types and paths of a removed item away, runs `Fix`, touches the controller (so the strings follow at the end of the request) and tells the player what changed through `Host.DrawInfo` (so the event `onRPGMessage`, or `client.text`); it returns 1 when anything changed. It does not call `esrv_update_item` for the item: `apply_special` does. A potion changes `Player.OrigStats` and the account's `mudorigstats` line |
+| `SkillTable.CheckSkillToApply(world, who, item)` | `check_skill_to_apply` | readies the skill of a weapon, bow, potion, scroll, rod, wand or horn and sets `Player.ShootType`; 1 on success, 0 otherwise (with "You can't use that!" and the flag cleared) |
+| `SkillTable.ChangeSkill(world, who, skill)` | `change_skill` | calls `SkillTable.ApplySpecial(who, item, AP_APPLY or AP_UNAPPLY)`, which **wave 6B sets** when it ports `apply_special` (return 0 for done, 1 for not done); until it is set a skill that is not the chosen one cannot be readied, and the log says so |
+| `LivingChange.AddStatbonus(op)`, `RemoveStatbonus(op)`, `AllowedClass(op)`, `ChangeAttr(stats, attr, value)` | `add_statbonus`, `remove_statbonus`, `allowed_class`, `change_attr_value` | the player archetype's stat bonus into the stats and the rolled stats (and out again) |
+
+`change_abil` is ported with its messages (without the colour flag `NDI_BLUE` of the resistance lines: `DrawInfo` has no colours). The
+one part left out is `check_walk_on` of a player that floats down (there are no squares).
+
+**Golden values.** The numbers of the tests of `fix_player` (`LivingTests.cs`) come from `tests/Crossfire.Extension.Tests/golden/living_golden.c`:
+the arithmetic of the C function with its declarations (float, int and double conversions as C has them), compiled with gcc on x86-64
+(SSE) and run for twelve scenarios (bare, weapon and mail, armour that limits the speed, overload, speed from `exp`, resistances with a
+potion effect, a player that cannot use armour, braced, an experience object of level 13, a disease, a weapon skill). The file's header
+says how to run it.
 
 ## Gmaps (wave 4, lane 4G; protocol 1.1 section 7.1)
 

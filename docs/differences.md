@@ -213,10 +213,18 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
 
 ## The start path (`Crossfire.Extension/Gk`)
 
-- **`fix_player` is partly ported** (`FixPlayer.Fix`): the stats, the three life values and the weight limit. A player whose stats were
+- **`fix_player` is ported for players** (`FixPlayer.Fix`; wave 5D completed it). A monster is left as it is. `AT_PHYSICAL` (the bit mask 1)
+  indexes `prot[]` in the C code of a player that cannot use armour, so the magic resistance (index 1) is what the formula reads there:
+  kept as C has it. A player whose stats were
   never rolled (an account of this extension from before the start path) is left as its file has it: C always has `orig_stats` and
   the level arrays, the extension has them only after `roll_stats` (kept as the lines `mudorigstats`, `mudlevhp`, `mudlevsp` and
-  `mudlevgrace` of the account file).
+  `mudlevgrace` of the account file), and then its armour class, speed and resistances are left as they are too, not only the stats.
+- **`change_abil`** tells the player through `Host.DrawInfo` (no colour flag), leaves out `check_walk_on` of a player that floats down, and
+  keeps the changed rolled stats of a potion with the account (`StoreStats`). `change_skill` cannot apply a skill until wave 6B sets
+  `SkillTable.ApplySpecial`.
+- **The flush writes the strings of life and stats** (`mud_ac`, `mud_wc`, `mud_dam`, `mud_speed` and the others) when the text changed
+  and the player's strings were sent at login: Crossfire sends the whole status to the client at each `fix_player`; the extension
+  writes what changed.
 - **`give_initial_items` takes the list as an argument** and tests that: C tests `pl->randomitems` and uses `items`; here the player
   archetype has no `randomitems` and the class does.
 - **`init_player_exp`**: for a player that has some of the experience objects but not all, C's loop reads past its array and adds copies
