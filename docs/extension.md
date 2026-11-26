@@ -953,3 +953,47 @@ Crossfire has no gmaps: this is the extension's own rule (`Gk/Gmaps.cs`, `Dispat
     else is as the host said.
   - `LevelBlocked(level, x, y)` asks the one segment of the position (a position in no segment is blocked); `LevelLoadedAt(level, x, y)`
     the segment of the position (no segment: false); `LevelLoaded(name)` a segment or level name.
+
+## Pick up and drop (lane 5A of wave 5; docs/mud-phase3.md section 3)
+
+Objects move between a level and a player's tree. The ported C is `Gk/Pickup.cs` and `Gk/PickupDrop.cs` (server/c_object.c:
+`pick_up_object`, `pick_up`, `command_take`, `drop_object`, `drop`, `command_dropall`, `command_drop`, `sack_can_hold`); the level side
+and the entry points are `Dispatcher.Wave5A.cs`. Tested in `PickupTests.cs`.
+
+**The script's surface** (ids in the ranges of lane 5A):
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `muddropinvobject` | 4100 | `int`, `float`, `float`, `int` | `bool` | a slow function: `ctx.player` drops `n` (0: all) of the item of his own tree with that id (`FindItemById`, deep: also from a sack) at (x, y) of the request's level (`ctx.level`; on a gmap the segment of the position). False, and nothing changed, for an id that is no item of his tree, a negative `n`, an object with `no_drop`, or a place the extension does not hold ("You can't drop that here."); busy before anything changes |
+| `mudpickupobject` | 4000 | `int` | `bool` | a method of `TMudObject`: `ctx.player` picks up `n` (0 or more than the stack: all) of the object. On a ground object: false and no text for `nopick` and `unpaid` (docs/mud-phase3.md section 3, rule 6); "You can't pick up the X." for what C's `can_pick` refuses; "That item is too heavy for you to put it in your inventory." when it is too heavy. On the proxy of an item in a container of the player's own tree: it goes into the pack (or the open container). Any other proxy, or a level the extension does not hold: false |
+| `mudpickupobject2` | 4001 | `int` | `bool` | the same (GK's scripts call it from a `with` block on the item; the actor is `ctx.player` all the same) |
+
+(The function is the operation 4100; the two methods are the members 4000 and 4001 of `TMudObject`. Operations and members are numbered
+apart. The test lane of `PickupTests.cs` registers `t5acommand` as operation 4900.)
+
+**The rows of the table** (docs/mud-phase3.md section 3), with the effects of one reply in the order they have there:
+
+- *pick up whole*: `npc.remove` of the object, then (the flush) `client.set` of its string; its handle and tag stay: the level object
+  becomes the item's proxy (`AdoptLevelObject`), `muditems` lists the same handle;
+- *pick up and merge*: the same, and the level object's handle is dead (`bad_handle`); the stack keeps its own tag, its string is set;
+- *pick up part*: `GetSplitOb`; the level object keeps its tag and a smaller `nrof`, the level is saved, and the event `onUpdateObject`
+  (the manifest has it, target `object`) is sent for it; the new part has a new tag and a `client.set`;
+- *drop whole*: `client.del` of the string, then `npc.place` of the object as a level object with the **same handle** (the item's proxy
+  is the level object now; a script that held it still reads the object); the object's `mudowner` is the player's account;
+- *drop part*: `client.set` of the smaller stack, then `npc.place` of a new object with a new tag.
+
+A starting item (`startequip`) that is dropped is taken back by "the gods" (two lines, `client.del`, freed; the handle dies). The drop
+asks `Dispatcher.DropPlaceAt` for the place before it changes anything, and the move goes through `Dispatcher.SubmitMove` (a pick
+up: level first, account second; a drop: account first, level second; "Moves across files").
+
+**The commands** (for wave 7's `mudcommand` table; each answers `busy` before it changes anything, writes its lines with `DrawInfo`,
+and answers nil): `Dispatcher.CommandTake(PlayerState, string?)`, `CommandDrop(PlayerState, string?)` and
+`CommandDropAll(PlayerState, string?)` (null, `weapons`, `armor`, `armour` or `misc`). `drop` and `dropall` put the objects at the
+player's feet: they ask `player.pos` once (through `Dispatcher.PlayerPosition`, translated into the gmap's tiles for a script on a gmap,
+then `DropPlaceAt`); a failed query is the request's answer, nothing changed. `take` needs a position only when no container is open.
+
+**For the next waves.** `Dispatcher.PutObjectInSack` (`Func<op, sack, tmp, nrof, bool>`) is what `drop` calls while a container is
+open, and `Dispatcher.ApplySpecialUnapply` (`Func<op, tmp, int>`, zero for unapplied) what `drop_object` calls for an applied object;
+wave 6 sets both (until then nothing is dropped into a container and an applied object stays). `Pickup.SackCanHold` is the port of
+`sack_can_hold` for `put_object_in_sack`. A pick up into a container uses `Pickup.PickUp`'s search for an applied container.
+
