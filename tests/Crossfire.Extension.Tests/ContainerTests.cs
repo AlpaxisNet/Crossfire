@@ -224,6 +224,8 @@ public sealed partial class ContainerTests
         /// <summary>The tag of the player's own handle: what a script knows as the id of the player.</summary>
         public long PlayerTag() => (uint)Ext.Call(5, new[] { S("bob") }, player: "bob").Result.AsHandle;
 
+        public ulong PlayerHandle() => Ext.Call(5, new[] { S("bob") }, player: "bob").Result.AsHandle;
+
         public static ulong ItemHandle(long tag) => (1UL << 32) | (uint)tag;
 
         public ReplyFrame Move(long id, long to, long n, string account = "bob") =>
