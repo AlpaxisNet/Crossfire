@@ -54,4 +54,13 @@ capped.sh -l -m 6G -t 25m dotnet test Crossfire.sln -c Release --no-build
 
 # the suite's end-to-end test of the extension with the game server (SUITE: a checkout of the Alpaxis Suite; skipped without it)
 SUITE=/path/to/Alpaxis.Suite scripts/e2e-with-suite.sh
+
+# the extension for a game server's machine: self-contained for Linux x64, as the folder <out>/crossfire/ (about 82 MB)
+SUITE=/path/to/Alpaxis.Suite scripts/publish.sh <out>
 ```
+
+**Installing it.** A game server runs the extension from `extensions/crossfire/` beside its executable, the folder
+`scripts/publish.sh` makes. The game server's machine needs no .NET of its own: the published folder carries the runtime. A
+`dotnet build` output does not, so it starts only where a shared .NET 11 runtime is installed. A network that deploys its own
+game servers with the Alpaxis Suite names the folder that holds `crossfire/` as `HOSTING_EXTENSIONS` in its `network.conf`;
+`deploy.sh hosting` then installs it on the hosting machine.
