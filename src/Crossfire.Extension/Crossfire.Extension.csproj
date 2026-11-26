@@ -27,4 +27,10 @@
     <EmbeddedResource Include="Data\skill_params" LogicalName="skill_params" />
   </ItemGroup>
 
+  <!-- Crossfire's lib/def_help and lib/help/* at 8b7ee7f90, unchanged (docs/extension.md, "Commands"): what the command help reads -->
+  <ItemGroup>
+    <EmbeddedResource Include="Data\def_help" LogicalName="def_help" />
+    <EmbeddedResource Include="Data\help\*" LogicalName="help/%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

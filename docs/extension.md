@@ -674,7 +674,7 @@ last column.
 | `mudclass` | 538 | string | rw | no | extra line `mudclass` | players.md 5.9, 5.13: the class's name as text; set by `setmudclass` (phase 3) |
 | `peaceful` | 539 | bool | rw | no | extra line `mudpeaceful` | objects.md 5.4 (TMudPlayer members), players.md 5.6 |
 | `lastdeath` | 540 | int | rw | no | extra line `mudlastdeath` (0 when absent) | objects.md 5.4: a timestamp GK writes |
-| `mudverbose` | 541 | bool | rw | no | extra line `mudverbose` | players.md 5.13: 16 reads |
+| `mudverbose` | 541 | int | rw | no | extra line `mudverbose` (a number from -128 to 127: C's `char`) | players.md 5.13: 16 reads; set by the command `verbose` (wave 7: it was a bool in wave 3) |
 | `levelcap` | 542 | int | rw | no | extra line `mudlevelcap` | players.md 5.9: GK writes it for trial accounts |
 | `wccap` | 543 | int | rw | no | extra line `mudwccap` | players.md 5.9 |
 | `accap` | 544 | int | rw | no | extra line `mudaccap` | players.md 5.9 |
@@ -1094,8 +1094,9 @@ closing change the account file (the applied flag). `Dispatcher.ApplyByLane` is 
 **A container on the ground** is the level object of a level the extension holds (its `CfObject` has no environment; a level object is
 flagged removed all the time). It is opened by the apply of the object (the face's `onApply` and `defaultApply`): `op->container` is
 the object, `WALK_OFF` and `FLY_OFF` are set (and cleared when it is closed), the level is marked to be saved, and the window shows its
-objects with the 1 in field 6. Nothing closes it when the player walks away (C's walk off is not ported: the square is the host's), so
-it stays open until he closes it, logs out or opens another. The id `mud_container` names is the tag of the object's item proxy
+objects with the 1 in field 6. Nothing closes it when the player walks away, and C does not either (`remove_ob` clears `container` only when the object itself
+leaves the square, `pick_up` and `drop` use the open container wherever it is); C's walk off is not ported (the square is the host's), so
+it stays open until he closes it, logs out or opens another, or another player picks it up ("Commands", below). The id `mud_container` names is the tag of the object's item proxy
 (`ItemProxy`), which `mudmoveinvobject` accepts as `to`; it is no id for `findinvobjectbyid`, which finds only objects of his tree
 (and not the ground container itself). The ground container is never an item of the window: `esrv_update_item` for it does nothing
 (the extension would take it for one of his items and kill its tag at the next flush).
@@ -1144,7 +1145,7 @@ container as a level face calls `defaultApply` on the face, which reaches `Apply
 **Fix lane of wave 6, containers.** A container on the ground that goes away while a player has it open is closed first, as
 `esrv_apply_container` closes it (the player is told "You close ..."): `level.unload` and the destruction of the object by a script
 do it (`Dispatcher.CloseOpenOn`), so that `Player.Container` never names a freed object and a drop never puts his things into it. Walking
-away from an open ground container is still not ported (docs/differences.md, "Containers"). Whatever leaves a container that lies on the
+away from an open ground container closes nothing, as in C (docs/differences.md, "Containers"). Whatever leaves a container that lies on the
 ground (`pick_up_object` of an object in it, `take` and `esrv_move_object` alike) sets `Pickup.From` to that level, so the level's
 file is written first and the account's second.
 
@@ -1366,3 +1367,34 @@ dirty.
 | `LIGHTER` (a player) | the marked object is the one to light: "You need to mark a lightable object."; a lighter with charges (`last_eat` and `stats.food`) loses one (one lighter of a stack is split off); "You attempt to light the X with a used up Y."; the object's saving throw against fire: "You light the X with the Y." (a glowing object becomes its `other_arch`, any other loses a random part and a `burnout` comes) or "... and fail." | 1; 0 for a monster |
 | `TREASURE` (a player) | a chest with contents puts each at the player's feet ("You find X in the chest."), then the empty chest goes; "The chest was empty." for an empty one (it goes too). A chest nobody filled is filled first (docs/differences.md). "You can't drop that here." and no change when there is no level at his feet | 1; 0 for a monster |
 | 160, 161 | "You can't apply that." | 1 |
+
+## Commands (lane 7A of wave 7; docs/mud-phase3.md section 4.6)
+
+The ported C is `Gk/Command.cs` (server/c_misc.c: `command_title`, `command_peaceful`, `command_brace`, `command_fix_me`,
+`command_listen`, `command_who`, `onoff_value`; server/c_chat.c: `command_tell`) and `Gk/HelpCommand.cs` (`command_help`, `help_topics`,
+`show_commands`); the table and the glue are `Dispatcher.Wave7A.cs`; the tests are `CommandTests.cs` and `ContainerCommandTests.cs`.
+What differs from C is in docs/differences.md, "Commands".
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `mudcommand` | 12000 | `string`, `string` | `void` | a slow function: `ctx.player` runs the command `cmd` with the text `params`; busy before anything changes |
+
+**`mudcommand(cmd, params)`**: `ctx.player` runs the command. The word (lower case)
+and the text are cut as C's `parse_string` cuts them (an empty text is none); every line the command says is `DrawInfo` (the event
+`onRPGMessage` with its fallback on a 1.1 link, a `client.text` effect on a 1.0 link); the answer is nil, also for a word that is no
+command ("Unknown command.  Try help."). A call with no logged-in player answers nil and logs. The function is slow, so the
+dispatcher answers `busy` before any command runs while the worker saves or recovers.
+
+| Command | What it is |
+| --- | --- |
+| `drop`, `dropall`, `take` (`get`) | lane 5A's `Dispatcher.CommandDrop`, `CommandDropAll`, `CommandTake`: into the open container when one is open (no position asked; the write order of "Moves across files": account then level for a drop into a container on the ground, level then account for a take out of it), else at the player's feet (`player.pos`) |
+| `mark [id or text]` | `command_mark`; a text of digits only is the `mudid` of an item of the top level (`#s(item)` of the Item-Menu). `markedobject` reads the item marked |
+| `save` | the account is written now ("You have been saved."); "SAVE FAILED!" for an unloaded account |
+| `title`, `peaceful`, `brace [on/off]`, `fix_me`, `fixme`, `verbose [n]`, `who`, `tell name text` | C's handlers |
+| `help [topic]`, `help topics`, `help commands` | C's `command_help` with `lib/def_help` and `lib/help/*` (26 topics) embedded in the extension (`Data/`) |
+| `useskill`, `readyskill`, `party`, `blood`, `search`, `cast`, `invoke`, any other word | "Unknown command.  Try help." |
+
+**Other changes of the lane.** `level.load` places only the objects of a page that are still on the level (`o.Level == level`), so an
+object adopted into a pack before its page is asked for is not placed. `Dispatcher.RemoveObFromMap` takes an object that leaves a map
+out of the `container` of the players who have it open (`remove_ob`), and the flush keeps the proxy of an open container that is on
+the ground ("Containers" above; docs/differences.md, "Containers"). The member `mudverbose` is a number, not a bool.
