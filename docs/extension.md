@@ -1069,8 +1069,74 @@ then `DropPlaceAt`); a failed query is the request's answer, nothing changed. `t
 
 **For the next waves.** `Dispatcher.PutObjectInSack` (`Func<op, sack, tmp, nrof, bool>`) is what `drop` calls while a container is
 open, and `Dispatcher.ApplySpecialUnapply` (`Func<op, tmp, int>`, zero for unapplied) what `drop_object` calls for an applied object;
-wave 6 sets both (until then nothing is dropped into a container and an applied object stays). `Pickup.SackCanHold` is the port of
+wave 6 sets both: lane 6A sets `PutObjectInSack` in `InitWave6A` ("Containers", below), 6B sets `ApplySpecialUnapply`; until 6B does, an applied object stays where it is, in a drop and in a put into a container. `Pickup.SackCanHold` is the port of
 `sack_can_hold` for `put_object_in_sack`. A pick up into a container uses `Pickup.PickUp`'s search for an applied container.
+## Containers (lane 6A of wave 6; docs/mud-phase3.md sections 4.2, 4.4 and 5)
+
+The ported C is `Gk/Container.cs` (server/c_object.c `put_object_in_sack`, socket/item.c `esrv_move_object`) and `Gk/ContainerApply.cs`
+(server/apply.c `esrv_apply_container`, server/player.c `find_key`), all members of the partial class `Pickup`; the dispatcher's side is
+`Dispatcher.Wave6A.cs` and `Gk/Manifest.Wave6A.cs`; the tests are `ContainerTests.cs` and `ContainerMoveTests.cs`. The lane has one function, no
+method and no type (ids 8000 to 8999 are free beyond `mudmoveinvobject` = 8000; the test function `t6a` is 8900).
+
+**The three states of a container** (apply.c): *closed* (not applied), *readied* (applied, not open: what matches is put into it when it
+is picked up) and *open* (applied and `op->container` points to it: `Player.Container`, which is `PlayerState.Ob.Container`). Applying a
+closed container readies it, applying a readied one opens it, applying the open one closes it. Opening a container while another is open
+closes the other first, but only when the one that is applied is itself applied (a closed one is only readied, as in C). A locked
+container (`slaying` set) needs a key (`find_key`): "You unlock X with Y." or "You don't have the key to unlock X." and the apply fails.
+A container that lies in another container cannot be opened ("You can't open X"). `manual_apply` answers 1 for both types whatever
+`esrv_apply_container` returned.
+
+**Apply by lane.** `ApplyWave6A(op, tmp, aflag)` answers 1 for `CONTAINER` (122: `esrv_apply_container(op, tmp)`) and `CLOSE_CON` (121:
+the same for `tmp->env`, the container the closer lies in) and null for any other type; an applier that is no player does nothing (C's
+`apply_container` returns 0 for it). The caller (6B's `command_apply` and `mudapplyinvobject`, which is slow) answers busy first: opening and
+closing change the account file (the applied flag). `Dispatcher.ApplyByLane` is the one entry point.
+
+**A container on the ground** is the level object of a level the extension holds (its `CfObject` has no environment; a level object is
+flagged removed all the time). It is opened by the apply of the object (the face's `onApply` and `defaultApply`): `op->container` is
+the object, `WALK_OFF` and `FLY_OFF` are set (and cleared when it is closed), the level is marked to be saved, and the window shows its
+objects with the 1 in field 6. Nothing closes it when the player walks away (C's walk off is not ported: the square is the host's), so
+it stays open until he closes it, logs out or opens another. The id `mud_container` names is the tag of the object's item proxy
+(`ItemProxy`), which `mudmoveinvobject` accepts as `to`; it is no id for `findinvobjectbyid`, which finds only objects of his tree
+(and not the ground container itself). The ground container is never an item of the window: `esrv_update_item` for it does nothing
+(the extension would take it for one of his items and kill its tag at the next flush).
+
+**`mudmoveinvobject(id, to, count)`** (function, op 8000, `Slow: true`, returns `bool`): `esrv_move_object`. `id` is an item of the
+request player's own tree (`FindItemById`, deep: also an item of a closed sack; another player's id, a level object's, a dead tag, 0
+and a negative count are false with nothing said). `to`:
+
+| `to` | what happens |
+| --- | --- |
+| 0 or -1, or the tag of the player's own handle (C's `pl->count`) | Graal Kingdoms' "window": the object comes out of its container into the pack: `pick_up` (c_object.c), so into the open container when it is not where the object is, else the best applied container, else the player; "You pick up the X."; false when it is in the pack already. C's `to == 0` (the ground) is `muddropinvobject`'s |
+| the tag of an item of his tree, or of the open container | `esrv_move_object`'s test (`type == CONTAINER`, `can_pick`, `sack_can_hold`, with the texts of C), then `put_object_in_sack` |
+| anything else | false, nothing said |
+
+An item tag wins over the player's own tag (the two are numbers of different kinds that can be equal). `put_object_in_sack` puts the
+count (0: all) into the sack: "You put the X in Y." (C names a stack by its plural without the number, differences.md), merges into a
+stack of the sack, splits a stack for a part, unapplies an applied object first (`ApplySpecialUnapply`, 6B), refuses an object with
+`startequip` ("You cannot put the X in the container."), and for a container that holds objects moves its contents into the open
+container instead (one by one, "Your X fills up." when the next does not fit). The weight of the sack's contents follows `fix_weight`
+(a sack with `Str` 50 carries them at half: `ItemMatching.FixWeight`), the strings by the flush (`FixPlayer` asks for the whole window).
+
+**The files.** A move between two containers of the player's own tree changes his account file only (`Dirty`, written after the
+quiet time). A move that has a container on the ground on either side changes the level's file too and goes through `SubmitMove` like a pick up
+or a drop: out of the ground container into the pack the level is written first, into it the account first; a move inside one ground
+container marks only the level. `Pickup.From` and `Pickup.To` carry the levels to `Dispatcher.FinishMove`, which `drop` (while a container is open:
+`Dispatcher.PutObjectInSack`) and `mudmoveinvobject` both call.
+
+**`mud_container`** (4C's flush, unchanged): `<id>,<name>,<picture>` of the open container, the empty text when none is open; the items
+of the open container carry the 1 and the strings of the items of a container that was closed are deleted; only what changed is
+written. Closed and readied containers are one item string with the flags `a_none` (0) and `a_active` (4); the open one has `F_OPEN` (0x2000)
+too. The open container is not part of an account: after a logout and login the container is readied (applied), not open, and its
+whole tree (nested sacks, stacks, weights) is what was saved.
+
+**Keys.** `Pickup.FindKey(pl, container, door)` is `find_key`: a key in the top level of the player's inventory (type 24 for a door,
+type 21 with the door's `slaying` for anything else, a locked container included); a key inside a container is used only as
+`pl->contr->usekeys` allows. `Pickup.UseKeys` is `key_inventory` for every player (C's default; the command `usekeys` is not ported), so a key in
+a sack "vibrates as you approach the door" and is not used; the other two settings are ported and tested.
+
+**For the next lanes.** 6B's `manual_apply` asks `ApplyByLane` first and needs nothing else of this lane. 6E's e2e of a `restrictaccess`
+container as a level face calls `defaultApply` on the face, which reaches `ApplyWave6A` with the level object's `CfObject`.
+
 ## The inventory functions (lane 5B)
 
 Docs/mud-phase3.md section 4.2 of the suite is the specification; the code is `Dispatcher.Wave5B.cs`, `Gk/Inventory.cs` (the C: the weight

@@ -182,7 +182,7 @@ public sealed partial class ContainerTests
     public void Move_Given_a_container_that_holds_things_When_moved_onto_the_open_sack_Then_its_contents_move_until_the_sack_is_full()
     {
         // Arrange: the ring fits, the sword (3,000 g) does not fit a 1,000 g sack
-        using var g = new Game("arch sack\napplied 1\nend\narch bigsack\narch ring\nend\narch sword\nend\nend\n");
+        using var g = new Game("arch sack\napplied 1\nend\narch bigsack\narch ring\nend\narch sword\nend\narch gem\nend\nend\n");
         long sack = g.Tag("sack");
         Apply(g, sack);
 
@@ -200,7 +200,7 @@ public sealed partial class ContainerTests
                 "Your sack (open) (active) fills up.",
             },
             Lines(r));
-        Assert.Equal("sack[ring],bigsack[sword]", g.Tree());
+        Assert.Equal("sack[ring],bigsack[sword,gem]", g.Tree()); // the gem would fit, but C stops at the first that does not
     }
 
     [Fact]
@@ -216,6 +216,127 @@ public sealed partial class ContainerTests
         Assert.True(Result(r));
         Assert.Equal("You move the items from bigsack into sack (active).", Lines(r)[0]);
         Assert.Equal("sack[ring],bigsack", g.Tree());
+    }
+
+    [Fact]
+    public void Move_Given_a_count_of_one_for_an_object_that_is_no_stack_When_moved_Then_it_is_the_whole_object_and_not_a_part()
+    {
+        // Arrange
+        using var g = new Game("arch sack\napplied 1\nend\narch ring\nend\n");
+
+        // Act
+        ReplyFrame r = g.Move(g.Tag("ring"), g.Tag("sack"), 1);
+
+        // Assert: C's get_split_ob would answer "There are only 1 rings."
+        Assert.True(Result(r));
+        Assert.Equal("sack[ring]", g.Tree());
+    }
+
+    [Fact]
+    public void Put_Given_more_than_the_sack_holds_When_put_directly_Then_put_object_in_sack_asks_sack_can_hold_with_the_whole_stack()
+    {
+        // Arrange: eleven bananas weigh 1,100 g, the sack holds 1,000 g
+        using var g = new Game("arch sack\napplied 1\nend\narch banana\nnrof 11\nend\n");
+
+        // Act
+        ReplyFrame r = g.T("put", Val.Int(g.Tag("sack")), Val.Int(g.Tag("banana")));
+
+        // Assert
+        Assert.False(r.Result.AsBool);
+        Assert.Equal(new[] { "That won't fit in the sack (active)!" }, Lines(r));
+        Assert.Equal("sack,bananax11", g.Tree());
+    }
+
+    [Fact]
+    public void Move_Given_a_container_with_contents_and_a_sack_that_is_not_active_When_moved_Then_it_is_refused_before_any_object_moves()
+    {
+        // Arrange
+        using var g = new Game("arch sack\nend\narch bigsack\narch ring\nend\nend\n");
+
+        // Act
+        ReplyFrame r = g.Move(g.Tag("bigsack"), g.Tag("sack"), 0);
+
+        // Assert
+        Assert.False(Result(r));
+        Assert.Equal(new[] { "The sack is not active." }, Lines(r));
+        Assert.Equal("sack,bigsack[ring]", g.Tree());
+    }
+
+    [Fact]
+    public void Move_Given_an_object_that_cannot_be_picked_up_When_moved_to_the_window_Then_nothing_moves_and_the_count_is_forgotten()
+    {
+        // Arrange: the statue has no_pick; C's pick_up refuses it before it reads the count
+        using var g = new Game("arch sack\napplied 1\narch statue\nend\nend\n");
+        Apply(g, g.Tag("sack"));
+
+        // Act
+        ReplyFrame r = g.Move(g.Inner("sack", "statue"), 0, 3);
+
+        // Assert
+        Assert.False(Result(r));
+        Assert.Equal(0L, g.T("contr").Result.AsInt);
+        Assert.Equal("sack[statue]", g.Tree());
+    }
+
+    [Fact]
+    public void Move_Given_a_move_between_the_players_sacks_When_the_writer_has_a_short_quiet_time_Then_his_account_is_written_without_a_logout()
+    {
+        // Arrange
+        using var g = new Game("arch sack\napplied 1\nend\narch ring\nend\n");
+        string before = ReadData(g.Ext, "accounts/bob.txt");
+
+        // Act
+        Assert.True(Result(g.Move(g.Tag("ring"), g.Tag("sack"), 0)));
+
+        g.Ext.Call(3); // session.flush: the snapshot of what changed
+
+        // Assert
+        Assert.True(WaitFor(() => ReadData(g.Ext, "accounts/bob.txt") != before));
+    }
+
+    [Fact]
+    public void Apply_Given_a_container_of_the_pack_and_one_on_the_ground_When_opened_Then_the_account_and_the_level_are_written_after_the_quiet_time()
+    {
+        // Arrange
+        using var g = new Game("arch sack\nend\n");
+        string before = ReadData(g.Ext, "accounts/bob.txt");
+
+        // Act
+        Apply(g, g.Tag("sack"));
+        g.T("apply", H(g.Hall[0]), Val.Int(0));
+        g.Ext.Call(3); // session.flush: the snapshot writes what changed
+        bool account = WaitFor(() => ReadData(g.Ext, "accounts/bob.txt") != before);
+        bool level = WaitFor(() => ReadData(g.Ext, "levels/hall.map").Contains("walk_off 1"));
+
+        // Assert
+        Assert.True(account);
+        Assert.True(level);
+    }
+
+    [Fact]
+    public void Move_Given_a_move_inside_a_sack_on_the_ground_When_the_writer_has_a_short_quiet_time_Then_its_level_is_written_without_a_move()
+    {
+        // Arrange
+        var order = new List<string>();
+        var g = new Game(options: ContainerWorld.Options(new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(20),
+            MaxDelay = TimeSpan.FromMilliseconds(100),
+            BetweenMove = (source, destination) => order.Add(source + ">" + destination),
+        }));
+        ReplyFrame opened = g.T("apply", H(g.Hall[2]), Val.Int(0));
+        long banana = Sets(opened).Where(kv => kv.Value.StartsWith("banana", StringComparison.Ordinal)).Select(kv => long.Parse(kv.Key.Substring("clientr.mud_item".Length))).Single();
+        long bigsack = Sets(opened).Where(kv => kv.Value.StartsWith("bigsack", StringComparison.Ordinal)).Select(kv => long.Parse(kv.Key.Substring("clientr.mud_item".Length))).Single();
+
+        // Act
+        Assert.True(Result(g.Move(banana, bigsack, 0)));
+        g.Ext.Call(3);
+        bool written = WaitFor(() => System.Text.RegularExpressions.Regex.IsMatch(ReadData(g.Ext, "levels/hall.map"), "arch bigsack[\\s\\S]*?arch banana"));
+        g.Dispose();
+
+        // Assert
+        Assert.True(written);
+        Assert.Empty(order);
     }
 
     [Fact]

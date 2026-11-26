@@ -88,6 +88,15 @@ internal static class ContainerWorld
                 int? r = d.ApplyByLane(other, Item(a[2])!, 0);
                 return Outcome.Ok(r == null ? Val.Nil : Val.Int(r.Value));
             }
+            case "esrvasground": // an object that is no player applies a container on the ground
+            {
+                CfWorld w = d.WorldOrNull!;
+                CfObject other = w.ArchToObject(w.FindArchetype("pet"))!;
+                int r = d.Pickups.EsrvApplyContainer(other, Item(a[2]));
+                return Outcome.Ok(Val.Int(r));
+            }
+            case "contr":
+                return Outcome.Ok(Val.Int(p.Count));
             case "esrvas": // another object applies: nothing happens
             {
                 CfObject other = d.WorldOrNull!.ArchToObject(d.WorldOrNull.FindArchetype("pet"))!;
@@ -375,6 +384,22 @@ public sealed partial class ContainerTests
     }
 
     [Fact]
+    public void Apply_Given_an_applier_that_is_no_player_When_a_container_on_the_ground_is_applied_Then_it_answers_0_and_the_container_stays_as_it_was()
+    {
+        // Arrange
+        using var g = new Game();
+        Val ground = H(g.Hall[0]);
+
+        // Act
+        ReplyFrame r = g.T("esrvasground", ground);
+
+        // Assert
+        Assert.Equal(0L, r.Result.AsInt);
+        Assert.Empty(Lines(r));
+        Assert.False(g.T("flag", ground, Val.Int(Define.FLAG_APPLIED)).Result.AsBool);
+    }
+
+    [Fact]
     public void Apply_Given_an_object_that_is_no_container_or_no_player_When_esrv_apply_container_is_called_Then_it_answers_0_and_logs_the_error_of_C()
     {
         // Arrange
@@ -519,6 +544,7 @@ public sealed partial class ContainerTests
     [InlineData((int)UseKeys.Containers, false, "sack", null)]
     [InlineData((int)UseKeys.Keyrings, true, "keyring", "skeleton key")]
     [InlineData((int)UseKeys.Keyrings, true, "sack", null)]
+    [InlineData((int)UseKeys.Keyrings, true, "fruitbasket", null)]
     [InlineData((int)UseKeys.Keyrings, false, "keyring", null)]
     [InlineData((int)UseKeys.KeyInventory, true, "keyring", null)]
     public void FindKey_Given_a_usekeys_setting_When_the_key_is_in_a_container_Then_only_the_allowed_containers_give_it(int mode, bool active, string holder, string? expected)

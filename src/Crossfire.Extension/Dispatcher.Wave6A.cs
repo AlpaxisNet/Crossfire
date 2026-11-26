@@ -29,16 +29,10 @@ internal sealed partial class Dispatcher
         switch (tmp.Type)
         {
             case Define.CLOSE_CON:
-                if (op.Type == Define.PLAYER)
-                {
-                    Pickups.EsrvApplyContainer(op, tmp.Env);
-                }
+                Pickups.EsrvApplyContainer(op, tmp.Env); // 0 and nothing done for an applier that is no player, as in C
                 return 1;
             case Define.CONTAINER:
-                if (op.Type == Define.PLAYER)
-                {
-                    Pickups.EsrvApplyContainer(op, tmp);
-                }
+                Pickups.EsrvApplyContainer(op, tmp);
                 return 1;
             default:
                 return null;
@@ -80,7 +74,7 @@ internal sealed partial class Dispatcher
             return Outcome.Ok(Val.False);
         }
         Pickups.Begin();
-        if (!ps.Loaded || count < 0 || FindItemById(ps, (long)Math.Truncate(id), deep: true) is not { } item)
+        if (count < 0 || FindItemById(ps, (long)Math.Truncate(id), deep: true) is not { } item)
         {
             return Outcome.Ok(Val.False);
         }

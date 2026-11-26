@@ -263,9 +263,38 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
 - **`mudowner`** of a dropped object is the dropping player's account (C has no such field: its `owner` would keep the object out of the
   level file, docs/mud-phase3.md section 3, rule 5).
 - **An applied object is not dropped** until wave 6 sets `Dispatcher.ApplySpecialUnapply` (C calls `apply_special` to unapply it first);
-  a drop into an open container does nothing until `Dispatcher.PutObjectInSack` is set.
+  a drop into an open container is `Dispatcher.PutObjectInSack` (lane 6A, "Containers" below).
 - **The square of `command_take`** is the level's objects whose tile is the player's (the position from the query `player.pos`),
   the one placed last first; C's chain `op->below`. An object that no `level.load` has shown to the host yet is not on the square.
+## Containers (`Gk/Container.cs`, `Gk/ContainerApply.cs`, `Dispatcher.Wave6A.cs`; lane 6A of phase 3)
+
+- **`put_object_in_sack` moves a container's contents into `op->container`.** C reads that pointer without looking: it is null when
+  `esrv_move_object` puts a container that holds objects onto a sack and no container is open, and C then crashes in `query_name`. The
+  target sack stands in for it. When another container is open, C's mixture is kept: the open one is asked whether each object fits and
+  the object goes into the sack that was named.
+- **The count of a stack.** A count that is the whole object (its `nrof`, or 1 for an object that is no stack) is no part of it, as in
+  `drop_object` (above): `mudmoveinvobject(id, to, 1)` of a sword puts the sword in; C would send it to `get_split_ob`, which says "There
+  are only 1 swords.". A larger count is refused by `get_split_ob` with its text after `sack_can_hold` passed.
+- **C names a stack by its plural without the number.** "You put the bananas in sack (open) (active)." for four bananas, "You pick up
+  the bananas.", "The swords is not a container." for a sword that is no stack (its `nrof` is 0): `query_name` of C, as 5A found for the pick up.
+- **`esrv_move_object` has no drop to the ground and no count of the player.** `to` 0 (C: the ground) and -1 are Graal Kingdoms' window
+  (the pack), which is `pick_up`; `muddropinvobject` drops. `pl->count`, the one id C sends for the pack, is the tag of the player's own
+  handle (the object model's `count` is not a script's id); an item's tag wins when the two are equal. `to` may also be the id of the open
+  container, which is the proxy's tag that `mud_container` names, so that a container on the ground can be the target.
+- **The weight test of a move out of a sack counts the object twice.** `pick_up_object` adds the weight of what is picked up to what the
+  player carries, and the object is part of what he carries already; a player near his limit cannot take an object out of his own sack.
+  C does the same; the port keeps it.
+- **`usekeys` is `key_inventory` for every player** (C's default, which a player gets when his object is made; the command and the
+  saved setting are not ported). A key in a sack of his pack is not used: "The X in your Y vibrates as you approach the door", with no
+  colour (`NDI_BROWN` is not carried by `DrawInfo`). The message says "the door" for a locked container too, as C does.
+- **Nothing closes an open container when the player walks away** (C's `FLAG_WALK_OFF` sets it up; the host moves the player, not this
+  world), and the `EVENT_CLOSE` of the plugins is not run. A container on the ground opened here stays open (and its `applied`, `walk_off`
+  and `fly_off` are in the level file) until closed or until the player logs out; after a restart the level object is "applied" with nobody
+  holding it open, which `esrv_apply_container` handles as C does (it is cleared and set again by the next open).
+- **A container on the ground has no item string and no `findinvobjectbyid` id.** Its tag is the one of its proxy, shown in
+  `mud_container` and accepted by `mudmoveinvobject`. A container that is picked up whole while it is open keeps `op->container`: close it first.
+- **`apply_container`** (the version of C for a player without a client window) is not ported; see porting.md.
+
 ## The inventory functions (`Gk/Inventory.cs`, `Dispatcher.Wave5B.cs`; lane 5B of phase 3)
 
 Choices of Alpaxis where Graal Kingdoms' functions have no original in Crossfire (the names are in `docs/extension.md`, "The inventory
