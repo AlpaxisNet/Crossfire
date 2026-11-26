@@ -435,6 +435,7 @@ internal sealed partial class Dispatcher : IMemberEnv
         pairs.Add(("levels", Val.Int(levels.Count)));
         pairs.Add(("level_objects", Val.Int(levels.Values.Sum(l => l.Objects.Count))));
         pairs.Add(("players", Val.Int(players.Count)));
+        pairs.Add(("examine_lines", Val.Int(ExamineLines)));
         return Val.Map(pairs.ToArray());
     }
 

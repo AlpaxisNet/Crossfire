@@ -13,13 +13,25 @@ namespace Crossfire.Extension.Gk;
 internal sealed record ArchMember(int Id, string Name, string TypeName, Func<CfWorld, Archetype, Val> Read);
 
 /// <summary>The type TMudArch (a host object of the manifest, section 6): read-only, stable members of an archetype.</summary>
-internal static class TMudArchMembers
+internal static partial class TMudArchMembers
 {
     public const int TypeId = 1;
     public const string TypeName = "TMudArch";
     public const int FirstMemberId = 100;
 
     private static readonly List<ArchMember> All = Build();
+
+    /// <summary>The methods of the type (the lanes' own, each in the range of its lane: <see cref="ExtendMethods"/>).</summary>
+    public static IReadOnlyList<MethodDef> Methods { get; } = BuildMethods();
+
+    private static List<MethodDef> BuildMethods()
+    {
+        var methods = new List<MethodDef>();
+        ExtendMethods(methods);
+        return methods;
+    }
+
+    static partial void ExtendMethods(List<MethodDef> methods);
 
     /// <summary>The members in the order of their ids.</summary>
     public static IReadOnlyList<ArchMember> Members => All;

@@ -157,6 +157,9 @@ public class CrossfireHost
     /// <summary>include/spells.h <c>spells[index].charges</c> (server/shop.c <c>query_cost</c> of a wand): the most charges a wand of that spell has. Default: 0 (no spell table yet).</summary>
     public virtual int SpellCharges(int index) => 0;
 
+    /// <summary>include/spells.h <c>spells[index].level</c> (server/c_object.c <c>examine</c> of a spell book): the level of the spell with that number. Default: 0 (no spell table yet).</summary>
+    public virtual int SpellLevel(int index) => 0;
+
     /// <summary>include/player.h <c>contr-&gt;digestion</c> (common/item.c <c>describe_monster</c>).</summary>
     public virtual int PlayerDigestion(IPlayerHandle contr) => 0;
 
