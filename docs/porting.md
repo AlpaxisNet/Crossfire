@@ -85,7 +85,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | C function | C# member | Status |
 | --- | --- | --- |
 | `find_archetype_by_object_name`, `get_archetype_by_object_name` | `CfWorld.FindArchetypeByObjectName`, `GetArchetypeByObjectName` | ported |
-| `find_best_weapon_used_match`, `item_matched_string` | `CrossfireHost.FindBestWeaponUsedMatch` | not ported: need the player's count (c_object.c's `count`; `query_name` is `CfWorld.QueryName` now); the loader calls the host when `current_weapon_script` is set |
+| `item_matched_string`, `find_best_weapon_used_match` | `ItemMatching.ItemMatchedString`, `ItemMatching.FindBestWeaponUsedMatch` | ported in the extension (`Gk/ItemMatching.cs`: they write the player's controller, `Player.Count`); `CrossfireHost.FindBestWeaponUsedMatch` is the loader's call, which the extension's host answers with the port |
 | `init_archetypes` | `CfWorld.InitArchetypes(text)` | ported |
 | `arch_info` | `CfWorld.ArchInfo` | ported (returns the text; C sends it to the player with `draw_info`) |
 | `clear_archetable`, `init_archetable` | `CfWorld.ClearArchetable`, `InitArchetable` | ported |
@@ -143,7 +143,15 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | common/friend.c | `add_friendly_object`, `remove_friendly_object` | `CfWorld.AddFriendlyObject`, `RemoveFriendlyObject` | ported; `dump_friendly_objects` and `clean_friendly_list` are not (the list is cleaned where the objects are processed, a later phase) |
 | lib/collect.pl.in | the traversal, the colour lines, the `anim` blocks | `ArchCollector.Collect` | ported as far as it changes the text of the `archetypes` and `animations` files; the pictures, `bmaps`, `faces` are not |
 | common/button.c | `add_button_link`, `get_button_value` | `CrossfireHost.AddButtonLink`, `GetButtonValue` | not ported: connections of a map |
-| common/living.c | `fix_player` | `CrossfireHost.FixPlayer` | not ported: the player's stats are the next phase |
+| common/living.c | `fix_player` | `CrossfireHost.FixPlayer` | not ported: the player's stats are a later wave; the extension's host answers the call by asking for a look at the player's window (docs/extension.md "Items of a player") |
+| common/living.c | `weight_limit[MAX_STAT + 1]` | `ItemMatching.WeightLimit`, `WeightLimitOf` | ported in the extension (the table of 31 values; a strength above `MAX_STAT` takes the last, a negative one, which C would index outside the table, the first) |
+| server/c_object.c | `find_best_object_match`, `find_marked_object`, `command_mark` | `ItemMatching.FindBestObjectMatch`, `FindMarkedObject`, `CommandMark` | ported in the extension (`Gk/ItemMatching.cs`; the lines C writes with `new_draw_info` go to `CrossfireHost.DrawInfo`) |
+| socket/item.c | `MarkItem` | `ItemMatching.MarkItem` | ported with the object already found (the client's tag is looked up by the caller, in the player's own tree) |
+| server/player.c | `fix_weight` | `ItemMatching.FixWeight`, `Dispatcher.FixWeight` | ported in the extension: for the players it is given; the extension calls it for a player at login (C calls it from its tick) |
+| socket/item.c | `query_flags` | `ItemStrings.QueryFlags` | ported in the extension (`Gk/ItemStrings.cs`); `ItemStrings.Flags` adds Graal Kingdoms' types 162 to 166 and `F_NOPICK` (docs/differences.md) |
+| socket/item.c | `esrv_send_item`, `esrv_update_item`, `esrv_del_item` | `CrossfireHost.EsrvSendItem`, `EsrvUpdateItem`, `EsrvDelItem` | not ported: the client's packets. The extension's host answers each call by marking the item in the player's `ShownTable`, and one flush at the end of the request writes the item strings |
+| socket/info.c, common/glue.c | `new_draw_info`, `new_draw_info_format` | `CrossfireHost.DrawInfo` | not ported: the extension's host sends the text to the player's script (docs/extension.md); flags and colour are not passed |
+| socket/item.c | `esrv_send_inventory`, `esrv_draw_look`, `esrv_apply_container`, `esrv_get_ob_from_count`, `ExamineCmd`, `ApplyCmd` | none | not ported: packets of the client; the item strings and the id scope of the extension (docs/extension.md) take their place |
 | common/treasure.c | `load_treasures`, the treasure lists | `CrossfireHost.LoadTreasures`, `FindTreasureList` | not ported here (the treasure phase); the default host knows every name |
 | include/player.h, include/map.h | `struct pl`, `mapdef` | `IPlayerHandle`, `IMapHandle` | not ported: markers that the owner implements |
 

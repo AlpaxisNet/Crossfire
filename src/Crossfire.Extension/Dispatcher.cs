@@ -134,6 +134,8 @@ internal sealed partial class Dispatcher : IMemberEnv
 
     CfWorld IMemberEnv.World => world!;
 
+    internal CfWorld? WorldOrNull => world;
+
     ulong IMemberEnv.HandleOf(object target) => handles.HandleOf(target);
 
     uint IMemberEnv.TagOf(object target) => handles.TagOf(target);
@@ -286,7 +288,7 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             return Outcome.Fail(Status.Internal, "the world has no Arch folder");
         }
-        gk = new GkHost();
+        gk = new GkHost { Items = this };
         var w = new CfWorld(gk, WorldLog);
         ArchCollection collection = ArchCollector.Collect(arch);
         w.InitArchetypes(collection.Archetypes);
@@ -447,6 +449,9 @@ internal sealed partial class Dispatcher : IMemberEnv
         public abstract SetResult Write(Val v);
 
         public virtual string? ClientName => null;
+
+        /// <summary>For a member that is a list of handles: the objects of the list; null for any other member.</summary>
+        public virtual IReadOnlyList<CfObject>? Items() => null;
     }
 
     private sealed class BoundArch : Bound
@@ -489,6 +494,8 @@ internal sealed partial class Dispatcher : IMemberEnv
         public override SetResult Write(Val v) => member.Write!(env, target, v);
 
         public override string? ClientName => member.ClientName;
+
+        public override IReadOnlyList<CfObject>? Items() => member.Items?.Invoke(env, target);
     }
 
     /// <summary>The member of that id on a target (an archetype, a level object or a player), or null when the target's type has none.</summary>
@@ -582,9 +589,42 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             return Outcome.Fail(Status.BadArgs, "get_list takes a handle, a member id and a list of field ids");
         }
-        // no member of the manifest has the type list:handle:<type> yet (the inventories are a later phase)
-        return WithTarget(args[0], t => Outcome.Fail(Status.BadArgs,
-            BindMember(t, id) == null ? "unknown member " + id : "member " + id + " is not a list of handles"));
+        var fields = new List<long>();
+        foreach (Val v in args[2].Items)
+        {
+            if (v.AsNumberToInt() is not { } field || TMudObjectMembers.Table.Find(field) is null)
+            {
+                return Outcome.Fail(Status.BadArgs, "a field id is not a member of TMudObject");
+            }
+            fields.Add(field);
+        }
+        return WithTarget(args[0], t =>
+        {
+            if (BindMember(t, id) is not { } m)
+            {
+                return Outcome.Fail(Status.BadArgs, "unknown member " + id);
+            }
+            if (m.Items() is not { } items)
+            {
+                return Outcome.Fail(Status.BadArgs, "member " + id + " is not a list of handles");
+            }
+            if (items.Count > manifest.MaxList)
+            {
+                return Outcome.Fail(Status.TooLarge, "the list has " + items.Count + " elements, the most get_list gives is " + manifest.MaxList);
+            }
+            var rows = new List<Val>(items.Count);
+            foreach (CfObject item in items)
+            {
+                LevelObject proxy = HolderOf(item) is { } holder ? TagItem(holder, item) : ItemProxy(item);
+                var row = new List<Val>(fields.Count + 1) { Val.Handle(handles.HandleOf(proxy)) };
+                foreach (long field in fields)
+                {
+                    row.Add(BindMember(proxy, field)!.Read());
+                }
+                rows.Add(Val.List(row));
+            }
+            return Outcome.Ok(Val.List(rows));
+        });
     }
 
     private Outcome Invoke(IReadOnlyList<Val> args)

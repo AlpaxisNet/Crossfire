@@ -17,19 +17,21 @@ The output folder of the build is an extension folder (protocol section 1): the 
   `CfWorld.InitArchetypes`, replies `{archetypes: <count>}`, logs a summary), `session.tick` (only with `wants_tick`),
   `session.flush`, `session.shutdown`, `player.login`, `player.logout`, `level.load`, `level.unload`, `get`, `set`, `get_many`,
   `get_list`, `invoke`, `object.destroyed`, `stats`, `objects.blobs` and the manifest functions below. `get_list` checks its
-  arguments and handle and then fails with `bad_args`, as the text says for a member that is no list of handles (no member of the
-  manifest is one yet). Every other op (`session.tick` when the manifest has `wants_tick` false, the reserved 17 to 63 and unknown
+  arguments, handle and field ids and gives the rows of a member that is a list of handles (`muditems`, lane 4C); a member that is no
+  list of handles is `bad_args`, more rows than `limits.max_list` is `too_large`. Every other op (`session.tick` when the manifest has `wants_tick` false, the reserved 17 to 63 and unknown
   manifest ids) is `unknown_op`; a request before the REPLY to `session.init` is `unavailable`. A reply carries the effects
   (`npc.place`, `npc.remove`, `client.set`, `client.del`) and events (`onUpdateObject`, `onLoadedMudAccount`) of its operation, only
   when its status is 0. No query is sent yet (the extension asks the host nothing in this version).
 - **Version.** The extension sends `proto_minor` 1 and knows the link's minor version once it has read the host's HELLO
   (`Dispatcher.LinkMinor`, below); its manifest is built after that and has no 1.1 key for a 1.0 host. Nothing 1.1 is declared by the
-  core: the lanes of phase 3 add what they need ("The skeleton of wave 4" at the end).
+  core: the lanes of phase 3 add what they need ("The skeleton of wave 4" and "Items of a player" at the end).
 - **Handles.** The epoch of the host's HELLO in the high 32 bits and one tag per archetype, level object and logged-in player in the
   low 32 bits, given out at the first need and never again for another object. A nil, other-epoch, tag-0, never-issued or dead handle
   is `bad_handle`. Releases are ignored: archetypes are permanent, objects in a level are never released, players log out. See
   "Levels, objects and accounts" below.
-- **Not here yet** (later waves): inventories, skills, money, the rules of phases 3 and 4, treasure lists, queries.
+- **Items.** A player's inventory has tags, strings for the client and the members `muditems`, `mudmoney`, `mudowner`, `markedobject` and
+  `currentweapon` ("Items of a player" at the end). **Not here yet** (later waves): pick up and drop, apply, skills, the rules of phases 3
+  and 4, treasure lists, queries.
 
 ## Lifecycle
 
@@ -500,7 +502,7 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `muddamage` | 224 | int | rw | yes | `ob->stats.dam` | 5.5: 193 writes (every monster class sets it). Client string `clientr.mud_dam`. |
 | `mudattacktype` | 225 | int | rw | yes | `ob->attacktype` | 5.5: a bit mask |
 | `mudspeed` | 226 | float | rw | no | `ob->speed`, a float as written in the file | 5.5: float, read only in the help, but GK writes it (67 writes). Client string `clientr.mud_speed`. |
-| `mudweight` | 227 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. Client string `clientr.mud_weight`. |
+| `mudweight` | 227 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. No client string of its own. |
 | `mudcarrying` | 228 | int | r | no | `ob->carrying` | 5.5: the weight of the contents, read only |
 | `mudmagic` | 229 | int | rw | no | `ob->magic` | 5.5; not stable (enchanting is a rule of a later phase) |
 | `mudluck` | 230 | int | rw | yes | `ob->stats.luck` | 5.5. Client string `clientr.mud_luck`. |
@@ -546,6 +548,9 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `startequip` | 270 | bool | rw | yes | `FLAG_STARTEQUIP` | 4.7 table; 5.5 |
 | `ismudmonster` | 271 | bool | r | yes | `FLAG_MONSTER` | 4.7 table: read only |
 | `ismudobject` | 272 | bool | r | yes | always true | 5.5: "true for every mud object" |
+| `muditems` | 1000 | list:handle:TMudObject | r | no | the visible objects of `ob->inv`, in inventory order | mud-phase3.md 4.2: each element gets its tag when it is read; `get_list` gives rows of at most `limits.max_list` (1,024 on a 1.1 link), more is `too_large` and the host reads the member with `get` |
+| `mudmoney` | 1001 | int | r | no | `query_money` (shop.c) | mud-phase3.md 4.2: the coins of a player or a container, 0 for any other object |
+| `mudowner` | 1002 | ref | rw | no | extra line `mudowner` (an account), or an NPC in memory | mud-phase3.md 3 rule 5 and 4.2: **1.1 only** (a `ref`: not in the manifest of a 1.0 link). Read: the handle of the player while that account is online, else the account text, nil for none; written: a player's handle or a text (the account, saved with the object), an NPC's handle (kept in memory only), nil or "" clears it |
 
 **Methods of TMudObject**
 
@@ -581,7 +586,7 @@ last column.
 | `muddamage` | 512 | int | rw | no | `ob->stats.dam` | 5.5: 193 writes (every monster class sets it). Client string `clientr.mud_dam`. |
 | `mudattacktype` | 513 | int | rw | no | `ob->attacktype` | 5.5: a bit mask |
 | `mudspeed` | 514 | float | rw | no | `ob->speed`, a float as written in the file | 5.5: float, read only in the help, but GK writes it (67 writes). Client string `clientr.mud_speed`. |
-| `mudweight` | 515 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. Client string `clientr.mud_weight`. |
+| `mudweight` | 515 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. The client string `clientr.mud_weight` is the whole weight the player carries (his own weight and `carrying`), written by the flush of lane 4C, not this member. |
 | `mudcarrying` | 516 | int | r | no | `ob->carrying` | 5.5: the weight of the contents, read only |
 | `mudmagic` | 517 | int | rw | no | `ob->magic` | 5.5; not stable (enchanting is a rule of a later phase) |
 | `mudluck` | 518 | int | rw | no | `ob->stats.luck` | 5.5. Client string `clientr.mud_luck`. |
@@ -612,6 +617,10 @@ last column.
 | `wccap` | 543 | int | rw | no | extra line `mudwccap` | players.md 5.9 |
 | `accap` | 544 | int | rw | no | extra line `mudaccap` | players.md 5.9 |
 | `ismudobject` | 545 | bool | r | yes | always true | objects.md 5.5: true for a player with a loaded mud account |
+| `muditems` | 1500 | list:handle:TMudObject | r | no | the visible objects of the player's `ob->inv` | as on `TMudObject` |
+| `mudmoney` | 1501 | int | r | no | `query_money` over the player's tree | mud-phase3.md 4.2; GS1's `playermudmoney` reads it |
+| `markedobject` | 1502 | ref | rw | no | `contr->mark` (c_object.c `find_marked_object`) | mud-phase3.md 4.2: **1.1 only**. Read: the proxy of the marked item, "" when none (or when the item left the inventory: C clears the mark then); written: an item of the player's own top level marks it, nil or "" clears it, any other handle changes nothing |
+| `currentweapon` | 1503 | handle:TMudObject | r | no | `ob->current_weapon` | mud-phase3.md 4.2: the applied weapon when it is in the player's inventory, else nil (the same source as `getwieldedobject`) |
 
 ### Events
 
@@ -620,6 +629,7 @@ last column.
 | `onUpdateObject` | object | sync | after a `set` of a member of a level object (above); `args` empty |
 | `onMudDestroy` | object | sync | declared for the rules of phase 4; `object.destroyed` and `destroymudobject` do not fire it (objects.md F5, F7) |
 | `onLoadedMudAccount` | player | sync | at the `player.login` that loaded the player; `args` is `[the player's handle]` |
+| `onRPGMessage` | player | sync | **1.1 only** (lane 4C): a line of text for the player (C `new_draw_info`); `args` is `[text]` (param type `string`); the fallback is the `client.text` effect, which the host runs when the player's class has no `onRPGMessage` |
 
 The modes are the design's default (events sync). A handle in `args` becomes the NPC that shows it, or nil (protocol 5): for a player
 that is nil until the host passes the player object itself (a protocol gap, reported with this wave).
@@ -705,12 +715,12 @@ to null and drops a flush that was asked for. `Dispatcher.ControllerOf(account)`
 `Player.Shown` is the `ShownTable`: `Sent` (the whole flag name with the text the client holds), and the tags marked by the ported
 C's `esrv_*` calls: `MarkDirty(tag)`, `MarkRemoved(tag)` (the last mark wins, each tag is in one list, in the order of first
 marking), `Dirty`, `Removed`, `ClearMarks()`. A mark calls `Player.Touch()`, which puts the controller in the dispatcher's list for
-the end of the request (once). Lane 4C writes the flush.
+the end of the request (once). Lane 4C wrote the flush ("Items of a player").
 
 ### The flush at the end of a request
 
 At the end of a request that ends with status 0 and before its REPLY is built (`Dispatcher.Handle`), `FlushControllers` takes each
-controller that asked for a flush, in the order it asked, once, and calls `partial void FlushShown(PlayerState)` (4C implements it
+controller that asked for a flush, in the order it asked, once, and calls `partial void FlushShown(PlayerState)` (4C implemented it
 in `Dispatcher.Items.cs`; it sets the strings with `SetClientString` (internal) and effects with `effects`, clears the marks) and
 then the test hook `ExtensionOptions.FlushHook`. The flush's effects follow those the request made itself. After a request that
 fails nothing is flushed and the marks stay for the next request that succeeds. When the REPLY is then replaced by `too_large`, the
@@ -739,3 +749,72 @@ On the dispatcher (`Dispatcher.Events.cs`), for a lane's code in the worker; the
   so the caller knows that the host will not replace a missing function.
 - `Dispatcher.TextFallback(account, text)` (the effect `client.text`) and `dispatcher.InvokeFallback(method, target, args)` (the invoke
   map) make the two kinds of fallback.
+
+## Items of a player (lane 4C of phase 3)
+
+What the extension does for the objects in a logged-in player's tree (docs/mud-phase3.md sections 3, 4.2 and 5). The code is
+`Dispatcher.Items.cs`, `Gk/ItemStrings.cs`, `Gk/ItemMatching.cs` and `Gk/TMudObjectMembers.Items.cs`; `SkeletonTests.cs` and
+`ItemTests.cs` test it.
+
+### Tags and their lifecycle
+
+An object of an inventory has a **proxy**, a `LevelObject` whose `Level` is `Level.Inventory` (a sentinel that is in no table and is
+never saved). The proxy is the key of the handle table, so the members of `TMudObject` read an item as they read an object of a level, and
+`mudid` is its tag. `Dispatcher.ItemProxy(ob)` makes the proxy and its tag at the first call; every item of a player's top level has one
+at `player.login`, an item in a sack gets one when `muditems` is read, an item that enters the tree when the client is told of it. The lane
+that moves an object between a level and an inventory (5A) keeps the one key: it gives the proxy a level (`LevelObject.Level`), or
+registers a level object's own proxy with `Dispatcher.AdoptLevelObject`; the tag then does not change.
+
+**Every exit of an object from the tree kills its tag.** The flush at the end of a request (below) looks at the whole window when the
+tree changed (the host's `FixPlayer` and `EsrvDelItem` tell it: an object entered or left a tree under a player) and **sweeps** the
+objects the player's tree remembers: an object that is freed has its tag killed (a decrease to 0, a merge's freed twin, `free_object`,
+a reset); one that is now in another player's tree keeps its tag and that player's window shows it; one that is nowhere, and whose proxy
+has no level, is killed. An object that got a tag outside a tree (a twin made before it was inserted) is swept as a "loose" item. At
+`player.logout` and at a level's unload, `FreeCfObject` kills the tags of everything inside the freed object. Test:
+`Tags_Given_a_thousand_logins_and_logouts...` (`Dispatcher.LiveTags` is the number of live tags; the tags themselves are never reused, so
+`Issued` grows, 300 slots of 8 bytes per login of a full pack).
+
+### The ids a client sends
+
+`Dispatcher.FindItemById(player, id, deep)` is the one way to turn an id that came from a client into an object: it looks in the
+player's own tree only (the top level and the open container, and with `deep` the sacks). Another player's tag, a level object's tag, a
+dead tag, 0 and a value outside 32 bits give null. `IMemberEnv.ItemOfPlayer` is the same for a handle; the write of `markedobject` uses it.
+
+### The strings: `Shown` and the flush
+
+The ported C's `esrv_send_item` and `esrv_update_item` (the host's `EsrvSendItem`, `EsrvUpdateItem`) mark the item in the owning player's
+`ShownTable` (`Dispatcher.ItemSent`); `esrv_del_item` (C names the object by a count that a freed object has lost) asks for a look at the whole window; a write of a member of an
+item marks it. At the end of a request that ends with status 0 (`FlushControllers`) each marked controller is flushed once
+(`Dispatcher.FlushShown`): a request with marks only compares the marked items with what the client holds; a request after a change of the
+tree (or after the effects of a request were lost: `NeedsResend`, which also sends the 22 stats again) compares the whole window. Only a
+changed text is written, as `client.set` of `clientr.mud_item<id>` (a stack that grows five times in one request writes one effect);
+the strings of what left the window are `client.del`. `ItemStrings.Text` is the seven comma fields (docs/mud-phase3.md section 5): the
+short name, the picture, the type, the quantity (`nrof`), the weight of the whole stack in grams, the flag word of `ItemStrings.Flags`
+(`query_flags`, Graal Kingdoms' types 162 to 166, `F_NOPICK`), and 1 inside the open container. The player's `clientr.mud_weight` (his
+weight and `carrying`) and `clientr.mud_weight_lim` (`weight_limit[Str]`) follow in each flush; `clientr.mud_container` is
+`<id>,<name>,<picture>` of the container in `ob->container`, the empty text when it was closed. At most 3,800 items are shown (the request
+carries at most 4,096 effects); a log line says so once. The names are in `PlayerState.ClientOrder`, so `player.logout` deletes them.
+`ExtensionOptions.FlushHook`, a test's stand-in, replaces this flush.
+
+### Lines of text
+
+`CrossfireHost.DrawInfo(who, text)` (C `new_draw_info`) is answered for a logged-in player by the player event `onRPGMessage` (target
+player, sync, one parameter of type `string`, `MinMinor` 1) with the `client.text` effect as its fallback; on a 1.0 link, which has no
+fallback, by the effect alone. For an object that is not a logged-in player it does nothing. The class `mudplayers` is declared as a
+player class on a 1.1 link (`ManifestBuilder.AddPlayerClass`).
+
+### The C functions of the player's controller
+
+`Gk/ItemMatching.cs` ports `item_matched_string`, `find_best_weapon_used_match`, `find_best_object_match`, `find_marked_object`,
+`command_mark`, `MarkItem`, `fix_weight` and the table `weight_limit[]`; the loader's call `FindBestWeaponUsedMatch` of the host is
+answered by the port. `Player.Count`, `Mark` and `MarkCount` are what C keeps in `struct pl`.
+
+### The members of lane 4C
+
+Ids 1000 to 1002 on `TMudObject` and 1500 to 1503 on `TMudPlayer` (the tables above). `muditems` is a `list:handle:TMudObject`: `get`
+gives the handles, `get_list` the rows (`[handle, field values]`), at most `limits.max_list` of them, which is 1,024 on a 1.1 link (256 on
+a 1.0 link); more is `too_large`. `mudowner` and `markedobject` have the type `ref`, a 1.1 name: they are not in the manifest of a 1.0 link
+(`MemberTable.ToManifest(linkMinor)`), and a type of the core may hold the members of every lane. `mudowner` is stored as an extra line
+(`mudowner`, a state key of the loader) with the account text; the extension sends the handle of the player while he is online. Objects a
+script or the engine makes (`mudaddobject`, `mudaddspecialobject`, `Dispatcher.NewItem`) are **identified**.
+

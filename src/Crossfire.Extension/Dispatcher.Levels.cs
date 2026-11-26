@@ -292,6 +292,7 @@ internal sealed partial class Dispatcher
 
     private void FreeCfObject(CfObject ob)
     {
+        ReleaseItemTags(ob);
         ob.SetFlag(Define.FLAG_REMOVED);
         world!.FreeObject(ob);
     }
@@ -310,7 +311,12 @@ internal sealed partial class Dispatcher
     /// <summary>The effect of a write on a target: the event of a level object (objects.md 3.2) or the client string of a player.</summary>
     private void AfterSet(object target, Bound member, Val stored, bool changed)
     {
-        if (target is LevelObject lo)
+        if (target is LevelObject { Level: var home } item && home == Level.Inventory)
+        {
+            // an object in an inventory has no NPC and no event: its string and the player's file change (lane 4C)
+            AfterItemSet(item, changed);
+        }
+        else if (target is LevelObject lo)
         {
             if (!changed)
             {
@@ -330,6 +336,7 @@ internal sealed partial class Dispatcher
             {
                 SetClientString(ps, name, Text(stored));
             }
+            ps.Contr?.Touch(); // the flush of lane 4C writes the weight and its limit, which a stat (the strength) changes
         }
     }
 
@@ -450,7 +457,7 @@ internal sealed partial class Dispatcher
             log(1, function + ": level " + level.Name + " holds " + level.Objects.Count + " objects, the most it may");
             return null;
         }
-        CfObject ob = world.ArchToObject(at)!;
+        CfObject ob = NewItem(at);
         return Attach(level, ob, x, y);
     }
 

@@ -108,6 +108,9 @@ internal sealed class ManifestBuilder
     private readonly HashSet<long> memberIds = new();
     private readonly Dictionary<string, EventDef> eventByName = new(StringComparer.Ordinal);
 
+    /// <summary>The most rows <c>get_list</c> gives on a 1.1 link: an inventory of 1,000 stacks is one request (docs/mud-phase3.md section 4.2).</summary>
+    public const int MaxListOf11 = 1024;
+
     public ManifestBuilder(int linkMinor)
     {
         LinkMinor = linkMinor;
@@ -118,6 +121,9 @@ internal sealed class ManifestBuilder
 
     /// <summary>True when the link speaks 1.1 or later.</summary>
     public bool Speaks11 => LinkMinor >= 1;
+
+    /// <summary>The <c>limits.max_list</c> of this link: the most rows <c>get_list</c> gives.</summary>
+    public int MaxList => Speaks11 ? MaxListOf11 : 256;
 
     /// <summary>The functions that are in this link's manifest, in the order they were registered.</summary>
     public IReadOnlyList<FunctionDef> Functions => functions;
@@ -176,7 +182,8 @@ internal sealed class ManifestBuilder
         foreach (Val m in t.Map.Get("members")!.Items.Concat(t.Map.Get("methods")!.Items))
         {
             long id = m.Get("id")!.AsInt;
-            if (!lane.OwnsMember(id))
+            // a type of the core (TMudObject, TMudPlayer) holds the members of every lane, each in its own range (docs/extension.md)
+            if (!lane.OwnsMember(id) && !(lane == Lane.Core && Lane.OfMember(id) != null))
             {
                 throw new InvalidOperationException("type " + t.Name + ": member or method id " + id + " is outside the range of lane " + lane.Name);
             }
@@ -185,17 +192,19 @@ internal sealed class ManifestBuilder
                 throw new InvalidOperationException("type " + t.Name + ": member or method id " + id + " is used twice");
             }
             ids.Add(id);
+            // the members of the core's types that need 1.1 (a ref) are left out of the map of a 1.0 link (MemberTable.ToManifest)
+            int minMinor = lane == Lane.Core ? Math.Max(t.MinMinor, LinkMinor) : t.MinMinor;
             if (m.Get("type") is { } type)
             {
-                CheckTypeSyntax(type.AsString, t.MinMinor);
+                CheckTypeSyntax(type.AsString, minMinor);
             }
             foreach (Val p in m.Get("params")?.Items ?? Array.Empty<Val>())
             {
-                CheckTypeSyntax(p.AsString, t.MinMinor);
+                CheckTypeSyntax(p.AsString, minMinor);
             }
             if (m.Get("ret") is { } ret)
             {
-                CheckTypeSyntax(ret.AsString, t.MinMinor);
+                CheckTypeSyntax(ret.AsString, minMinor);
             }
         }
         if (LinkMinor < t.MinMinor)
@@ -281,7 +290,7 @@ internal sealed class ManifestBuilder
             ("types", Val.List(types.Select(t => t.Map))),
             ("events", Val.List(events.Select(EventVal))),
             ("wants_tick", Val.Bool(wantsTick)),
-            ("limits", Val.Map(("max_list", Val.Int(256)))),
+            ("limits", Val.Map(("max_list", Val.Int(MaxList)))),
         };
         if (playerClasses.Count > 0)
         {

@@ -19,7 +19,8 @@ internal sealed class LevelObject
         Ob = ob;
     }
 
-    public Level Level { get; }
+    /// <summary>The level the object is in; <see cref="Level.Inventory"/> for an object in an inventory (lane 4C: it has a tag, no NPC); the lane that moves it to a level sets this.</summary>
+    public Level Level { get; set; }
 
     public CfObject Ob { get; }
 
@@ -43,6 +44,9 @@ internal sealed class LevelObject
 /// <summary>A level the extension holds the objects of (the map of Crossfire's <c>load_objects</c> and <c>save_objects</c>).</summary>
 internal sealed class Level : IMapHandle
 {
+    /// <summary>The place of the objects that are in an inventory and not in a level: never loaded, never saved, in no table.</summary>
+    public static readonly Level Inventory = new("(inventory)");
+
     public Level(string name)
     {
         Name = name;
