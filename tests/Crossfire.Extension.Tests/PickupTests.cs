@@ -788,6 +788,29 @@ public sealed class PickupTests
     }
 
     [Fact]
+    public void Drop_Given_a_level_the_host_loaded_that_has_no_file_and_no_seed_When_dropped_Then_the_object_is_placed_there_and_after_the_unload_it_is_refused()
+    {
+        // Arrange (wave 5 integration: the host announces every level it loads with level.load; an empty field is a level of the extension too)
+        using var g = new Game();
+        ulong banana = g.Items(g.Player).Single(i => i.Name == "banana").Handle;
+        ReplyFrame load = g.Ext.Call(7, new[] { S("field.nw"), Val.Nil }, level: "field.nw", player: "bob");
+
+        // Act
+        ReplyFrame dropped = g.Drop(banana, 3, 4, 0, level: "field.nw");
+        Assert.Equal(0UL, g.Ext.Call(8, new[] { S("field.nw") }, level: "field.nw").Status);
+        ulong second = g.Items(g.Player).First().Handle;
+        ReplyFrame refused = g.Drop(second, 3, 4, 0, level: "field.nw");
+
+        // Assert
+        Assert.Empty(load.Effects);
+        Assert.True(Result(dropped));
+        Assert.Single(Effects(dropped, "npc.place"));
+        Assert.Equal("field.nw", Effects(dropped, "npc.place")[0].Get("level")!.AsString);
+        Assert.False(Result(refused));
+        Assert.Equal(new[] { "You can't drop that here." }, Lines(refused));
+    }
+
+    [Fact]
     public void Drop_Given_a_request_with_no_level_When_dropped_Then_false_and_the_text()
     {
         // Arrange
