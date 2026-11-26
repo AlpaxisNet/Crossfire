@@ -135,10 +135,7 @@ internal static partial class TMudPlayerMembers
     /// </summary>
     private static SetResult SetMarked(IMemberEnv env, PlayerState p, Val value)
     {
-        if (p.Contr is not Player contr)
-        {
-            return SetResult.Fail("the player has no controller");
-        }
+        Player contr = p.Contr!; // a player state exists while the player is logged in, with its controller
         switch (value.Kind)
         {
             case ValKind.Nil:

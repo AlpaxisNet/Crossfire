@@ -105,6 +105,31 @@ internal static class ItemWorld
                 return Outcome.Ok(Val.Nil);
             case "mark":
                 return Outcome.Ok(Val.Int(ItemMatching.CommandMark(w, pl, a[2].IsNil ? null : a[2].AsString)));
+            case "keep": // the lane of pick up and drop gives the proxy a level: the tag stays when the object leaves the tree
+            {
+                CfObject item = Item(a[2])!;
+                d.ItemProxy(item).Level = new Level("elsewhere");
+                w.RemoveOb(item);
+                return Outcome.Ok(Val.Nil);
+            }
+            case "lose": // the object leaves the tree and is nowhere
+                w.RemoveOb(Item(a[2])!);
+                return Outcome.Ok(Val.Nil);
+            case "touchtag": // a mark of a tag, as the ported C makes it
+                p.Shown.MarkDirty((uint)a[2].AsInt);
+                return Outcome.Ok(Val.Nil);
+            case "send": // esrv_send_item for an object that the window does not show, and for an object of a monster
+            {
+                CfObject hidden = d.NewItem(w.FindArchetype("sword")!);
+                hidden.Invisible = 1;
+                w.InsertObInOb(hidden, pl);
+                w.Host.EsrvSendItem(pl, hidden);
+                CfObject rat = w.ArchToObject(w.FindArchetype("rat"))!;
+                w.Host.EsrvSendItem(rat, hidden);
+                w.Host.EsrvDelItem(rat.Contr, hidden.Count);
+                w.Host.EsrvDelItem(pl.Contr, 999999); // a count of no item
+                return Outcome.Ok(Val.Int(p.Shown.Dirty.Count));
+            }
             case "wield": // what apply_special will do: the player's current weapon
                 pl.CurrentWeapon = a[2].IsNil ? null : Item(a[2]);
                 return Outcome.Ok(Val.Nil);
@@ -363,7 +388,6 @@ public sealed class ItemTests
         // Assert
         Assert.Equal(new[] { "banana" }, inside.Select(i => i.Name));
         Assert.DoesNotContain(ItemKey(inside[0].Handle), Strings(r).Keys);
-        Assert.Equal(4L, 4); // the tag of a nested item is given at the read
         Assert.NotEqual(items[0].Handle, inside[0].Handle);
     }
 
@@ -600,15 +624,169 @@ public sealed class ItemTests
         ReplyFrame close = Do(ext, "open", "bob");
 
         // Assert
-        Assert.Equal("1,bag,mud_bag.png".Replace("1,", (uint)items[2].Handle + ","), Strings(open)["clientr.mud_container"]);
-        Assert.Equal("banana,mud_banana.png,6,2,200,0,1".Replace("banana,", "bananas,"), Strings(open)[ItemKey(inside[0].Handle)]);
-        Assert.StartsWith("bag,", Strings(open)[ItemKey(items[2].Handle)]);
-        Assert.EndsWith(",0x".Replace("0x", ((uint)0x2000 | 4u).ToString().Substring(0, 0) + "0"), ",0"); // placeholder: the bag's own string ends with 0 (not in the container)
+        Assert.Equal((uint)items[2].Handle + ",bag,mud_bag.png", Strings(open)["clientr.mud_container"]);
+        Assert.Equal("bananas,mud_banana.png,6,2,200,0,1", Strings(open)[ItemKey(inside[0].Handle)]);
+        Assert.Equal("bag,mud_bag.png,122,1,200,8192,0", Strings(open)[ItemKey(items[2].Handle)]); // F_OPEN: the bag is the player's open container
+        Assert.Equal("bag,mud_bag.png,122,1,200,0,0", Strings(close)[ItemKey(items[2].Handle)]);
         Assert.Equal(new[] { ItemKey(inside[0].Handle) }, Effects(close, "client.del").Select(e => e.Get("name")!.AsString));
         Assert.Equal("", Strings(close)["clientr.mud_container"]);
     }
 
+    [Fact]
+    public void Flush_Given_the_open_container_is_freed_When_the_request_ends_Then_the_container_string_is_emptied_and_the_open_state_is_dropped()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        var items = Items(ext, bob);
+        Do(ext, "open", "bob", Val.Int((uint)items[2].Handle));
+
+        // Act
+        ReplyFrame r = Do(ext, "free", "bob", Val.Int((uint)items[2].Handle));
+
+        // Assert
+        Assert.Equal("", Strings(r)["clientr.mud_container"]);
+        Assert.Null(ext.Dispatcher.ControllerOf("bob")!.State.Ob.Container);
+        Assert.Contains(ItemKey(items[2].Handle), Effects(r, "client.del").Select(e => e.Get("name")!.AsString));
+    }
+
+    [Fact]
+    public void Flush_Given_marks_of_tags_the_window_does_not_show_When_the_request_ends_Then_nothing_is_written()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        var items = Items(ext, bob);
+        var inside = Items(ext, items[2].Handle, player: false);
+
+        // Act
+        ReplyFrame nested = Do(ext, "touchtag", "bob", Val.Int((uint)inside[0].Handle)); // inside a closed sack
+        ReplyFrame unknown = Do(ext, "touchtag", "bob", Val.Int(777777));
+        ReplyFrame same = Do(ext, "touchtag", "bob", Val.Int((uint)items[0].Handle)); // shown, but the text is the same
+        Do(ext, "free", "bob", Val.Int((uint)items[0].Handle));
+
+        // Assert
+        Assert.Empty(Effects(nested, "client.set"));
+        Assert.Empty(Effects(unknown, "client.set"));
+        Assert.Empty(Effects(same, "client.set"));
+    }
+
+    [Fact]
+    public void Flush_Given_a_mark_of_an_item_in_the_open_container_When_the_text_changes_Then_the_string_has_field_6()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        var items = Items(ext, bob);
+        var inside = Items(ext, items[2].Handle, player: false);
+        Do(ext, "open", "bob", Val.Int((uint)items[2].Handle));
+
+        // Act
+        ReplyFrame r = Do(ext, "grow", "bob", Val.Int((uint)inside[0].Handle), Val.Int(1));
+
+        // Assert
+        Assert.Equal("bananas,mud_banana.png,6,3,300,0,1", Strings(r)[ItemKey(inside[0].Handle)]);
+    }
+
+    [Fact]
+    public void ItemSent_Given_an_invisible_object_and_a_monster_and_a_count_of_no_item_When_the_client_is_told_Then_nothing_is_marked()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        Login(ext, "bob");
+
+        // Act
+        ReplyFrame r = Do(ext, "send", "bob");
+
+        // Assert
+        Assert.Equal(0L, r.Result.AsInt);
+        Assert.DoesNotContain(Effects(r, "client.set"), e => e.Get("name")!.AsString.StartsWith("clientr.mud_item", StringComparison.Ordinal));
+    }
+
     // ------------------------------------------------------------------ the lifecycle of tags
+
+    [Fact]
+    public void Tags_Given_an_item_that_the_lane_of_pick_up_gave_a_level_When_it_leaves_the_tree_Then_the_tag_stays_and_the_string_goes()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        var items = Items(ext, bob);
+
+        // Act
+        ReplyFrame r = Do(ext, "keep", "bob", Val.Int((uint)items[1].Handle));
+
+        // Assert
+        Assert.Equal(new[] { ItemKey(items[1].Handle) }, Effects(r, "client.del").Select(e => e.Get("name")!.AsString));
+        Assert.Equal(0UL, ext.Call(9, new[] { H(items[1].Handle), Val.Int(Obj("mudrealname")) }).Status);
+    }
+
+    [Fact]
+    public void Tags_Given_an_item_that_leaves_the_tree_and_is_nowhere_When_the_request_ends_Then_its_tag_is_dead()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        var items = Items(ext, bob);
+
+        // Act
+        Do(ext, "lose", "bob", Val.Int((uint)items[1].Handle));
+
+        // Assert
+        Assert.Equal((ulong)Status.BadHandle, ext.Call(9, new[] { H(items[1].Handle), Val.Int(Obj("mudrealname")) }).Status);
+    }
+
+    [Fact]
+    public void Item_Given_a_write_that_changes_nothing_When_the_request_ends_Then_no_string_and_the_account_stays_clean()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        var items = Items(ext, bob);
+        PlayerState state = ext.Dispatcher.ControllerOf("bob")!.State;
+        state.Dirty = false;
+
+        // Act
+        ReplyFrame r = Set(ext, items[1].Handle, Obj("mudrealname"), S("sword"));
+
+        // Assert
+        Assert.Empty(Effects(r, "client.set"));
+        Assert.False(state.Dirty);
+    }
+
+    [Fact]
+    public void Item_Given_an_item_in_a_bag_that_a_level_holds_When_a_member_is_written_Then_the_level_is_saved()
+    {
+        // Arrange
+        TempFolder world = ItemWorld.MakeWorld();
+        File.WriteAllText(Path.Combine(world.Path, "mudlevels", "hall.nw"), ObjectWorld.SeedHall);
+        using DirectExt ext = Start(world);
+        var (places, _) = LoadAll(ext, "hall.nw");
+        ulong bag = places.Select(p => p.Get("handle")!.AsHandle).Last();
+        ulong banana = Items(ext, bag, player: false)[0].Handle;
+        ext.Call(3);
+
+        // Act
+        Set(ext, banana, Obj("mudrealname"), S("plantain"));
+        string file = Flushed(ext, "levels/hall.nw.map", t => t.Contains("name plantain"));
+
+        // Assert
+        Assert.Contains("name plantain", file);
+    }
+
+    [Fact]
+    public void Muditems_Given_an_empty_hand_and_a_monster_without_items_When_read_Then_an_empty_list()
+    {
+        // Arrange
+        TempFolder world = WorldWith("bob", "");
+        using DirectExt ext = Start(world);
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+
+        // Act / Assert
+        Assert.Empty(Items(ext, bob));
+        Assert.Equal(0, ext.Dispatcher.LiveItemTags);
+    }
+
 
     [Fact]
     public void Tags_Given_a_thousand_logins_and_logouts_When_counted_Then_the_live_tags_stay_flat()
