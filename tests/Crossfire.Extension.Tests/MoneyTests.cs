@@ -452,6 +452,27 @@ public sealed class MoneyTests
         Assert.Equal(10, Stacks(ext, ItemOf(ext, bob, "sack"), player: false)["goldcoin"]);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void MudPay_Given_a_sack_that_holds_no_gold_next_to_a_gold_pouch_When_the_pack_cannot_pay_Then_only_the_pouch_pays(bool sackFirst)
+    {
+        // Arrange: the pack has no coins; whichever of the two is walked first, the sack's coins are not money
+        string sack = "arch sack\napplied 1\narch goldcoin\nnrof 10\nend\nend\n";
+        string pouch = "arch pouch\napplied 1\narch goldcoin\nnrof 5\nend\nend\n";
+        using DirectExt ext = Start(MoneyWorld.Make("bob", sackFirst ? sack + pouch : pouch + sack));
+        ulong bob = Login(ext);
+
+        // Act
+        ReplyFrame r = Fn(ext, Manifest.OpMudPay, "bob", Val.Int(30));
+
+        // Assert
+        Assert.True(r.Result.AsBool);
+        Assert.Equal(10, Stacks(ext, ItemOf(ext, bob, "sack"), player: false)["goldcoin"]);
+        Assert.Equal(2, Stacks(ext, ItemOf(ext, bob, "pouch"), player: false)["goldcoin"]);
+        Assert.Equal(20, MoneyOf(ext, bob));
+    }
+
     [Fact]
     public void MudPay_Given_zero_or_a_negative_price_When_called_Then_zero_is_paid_and_a_negative_price_is_refused_without_change()
     {
