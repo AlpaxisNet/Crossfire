@@ -419,6 +419,43 @@ public sealed class AccountLifeTests
     }
 
     [Fact]
+    public void Title_Given_a_title_set_When_the_account_is_unloaded_and_loaded_Then_who_and_title_show_it()
+    {
+        // Arrange
+        using var g = new W7Game();
+        ulong bob = g.Handle("bob");
+        g.Ext.Call(Manifest.OpMudCommand, new[] { S("title"), S("the Bold") }, level: "hall", player: "bob");
+        g.Ext.Call(Manifest.OpMudCommand, new[] { S("save") }, level: "hall", player: "bob"); // unloadmudaccount drops the memory state unsaved
+        g.Method(bob, TMudPlayerMembers.MethodUnloadMudAccount, "bob");
+        g.Method(bob, TMudPlayerMembers.MethodLoadMudAccount, "bob", S(""));
+
+        // Act
+        List<string> who = W7Game.Lines(g.Ext.Call(Manifest.OpMudCommand, new[] { S("who") }, level: "hall", player: "bob"), "bob");
+        List<string> title = W7Game.Lines(g.Ext.Call(Manifest.OpMudCommand, new[] { S("title") }, level: "hall", player: "bob"), "bob");
+
+        // Assert
+        Assert.Contains("bob the the Bold P", who);
+        Assert.Equal(new[] { "Your title is 'the Bold'." }, title);
+    }
+
+    [Fact]
+    public void Title_Given_a_title_set_When_the_player_logs_out_and_in_Then_the_title_is_kept()
+    {
+        // Arrange
+        using var g = new W7Game();
+        g.Login("bob");
+        g.Ext.Call(Manifest.OpMudCommand, new[] { S("title"), S("the Bold") }, level: "hall", player: "bob");
+        g.Ext.Call(6, new[] { S("bob") });
+        g.Login("bob");
+
+        // Act
+        List<string> title = W7Game.Lines(g.Ext.Call(Manifest.OpMudCommand, new[] { S("title") }, level: "hall", player: "bob"), "bob");
+
+        // Assert
+        Assert.Equal(new[] { "Your title is 'the Bold'." }, title);
+    }
+
+    [Fact]
     public void LoadMudAccount_Given_an_unloaded_account_When_called_with_the_empty_suffix_Then_the_file_is_read_the_strings_sent_the_hooks_run_and_the_event_fires_once()
     {
         // Arrange

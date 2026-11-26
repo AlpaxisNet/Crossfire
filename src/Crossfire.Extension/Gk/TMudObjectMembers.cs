@@ -169,7 +169,7 @@ internal static partial class TMudPlayerMembers
         b.Add("mudid", "int", false, true, (env, p) => Val.Int(env.TagOf(p)), null);
         b.SharedLife(stable: false);
         b.ExtraStr("mudclass", "mudclass", true, false);
-        b.ExtraBool("peaceful", "mudpeaceful", true, false);
+        b.Bool("peaceful", Commands.IsPeaceful, (ob, v) => (ob.Extra ??= new ExtraKeys()).Set(Commands.PeacefulKey, v ? "1" : "0"), false); // C: a new player is peaceful (get_player); an account without the line is too
         b.ExtraInt("lastdeath", "mudlastdeath", 0, true, false, long.MinValue, long.MaxValue);
         b.ExtraInt("mudverbose", "mudverbose", 0, true, false, sbyte.MinValue, sbyte.MaxValue); // a level, as C's char `listen`; GK compares it with 5 and 10
         b.ExtraInt("levelcap", "mudlevelcap", 0, true, false);

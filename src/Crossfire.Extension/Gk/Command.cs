@@ -103,11 +103,17 @@ internal sealed class Commands
         contr.OwnTitle = parameters;
     }
 
+    /// <summary>C <c>pl-&gt;peaceful</c>: get_player (player.c) sets it to 1 ("default peaceful") and check_login (login.c) keeps that when the file has no <c>peaceful</c> line, so an account without the line <c>mudpeaceful</c> is peaceful; only a line of 0 is not.</summary>
+    internal static bool IsPeaceful(CfObject ob) => !(ob.Extra?.Get(PeacefulKey) is { } t && CStr.Atoi(t) == 0);
+
+    /// <summary>The account's line that holds <c>peaceful</c>.</summary>
+    internal const string PeacefulKey = "mudpeaceful";
+
     /// <summary>c_misc.c <c>command_peaceful</c>: toggles whether the player attacks other players (GK's member <c>peaceful</c>, the account's line <c>mudpeaceful</c>).</summary>
     public void Peaceful(PlayerState ps)
     {
         CfObject op = ps.Ob;
-        bool peaceful = !(op.Extra?.Get("mudpeaceful") is { } t && CStr.Atoi(t) != 0);
+        bool peaceful = !IsPeaceful(op);
         (op.Extra ??= new ExtraKeys()).Set("mudpeaceful", peaceful ? "1" : "0");
         ps.Dirty = true;
         Say(op, peaceful ? "You will not attack other players." : "You will attack other players.");
@@ -155,7 +161,7 @@ internal sealed class Commands
         foreach (PlayerState other in d.LoggedIn())
         {
             var contr = (Player)other.Ob.Contr!;
-            bool peaceful = other.Ob.Extra?.Get("mudpeaceful") is { } t && CStr.Atoi(t) != 0;
+            bool peaceful = IsPeaceful(other.Ob);
             Say(op, other.Ob.Name + " the " + (contr.OwnTitle.Length == 0 ? contr.Title : contr.OwnTitle) + " " + (peaceful ? "P" : "W"));
         }
     }

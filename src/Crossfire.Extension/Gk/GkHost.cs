@@ -23,7 +23,7 @@ internal sealed partial class GkHost : CrossfireHost
     /// </summary>
     public static readonly IReadOnlyList<string> StateKeys = new[]
     {
-        "mudx", "mudy", "mudblob", "mudimg", "randomvar", "marketprice", "account", "mudclass", "mudpeaceful", "mudlastdeath",
+        "mudx", "mudy", "mudblob", "mudimg", "randomvar", "marketprice", "account", "mudclass", "mudpeaceful", Player.OwnTitleKey, "mudlastdeath",
         "mudverbose", "mudlevelcap", "mudwccap", "mudaccap", "mudowner", Player.OrigStatsKey, Player.LevHpKey, Player.LevSpKey, Player.LevGraceKey,
     };
 
