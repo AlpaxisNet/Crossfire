@@ -21,6 +21,8 @@ internal static class ObjectWorld
         + "Object wolf\nname Wolf\nface wolf.131\nmonster 1\ngraalnpctype 1\nend\n"
         + "Object housedoor\nname house door\nface door.1\ntype 23\nend\n"
         + "Object bag\nname bag\nface bag.11\ntype 122\nend\n"
+        + "Object treasure\nname treasure\nface treasure.1\ntype 4\nend\n"
+        + "Object treasurechest\nname chest\nface chest.1\nend\n"
         + "Object nofaced\nname plain\nend\n";
 
     /// <summary>The script classes of the world (files of its scripts folder).</summary>

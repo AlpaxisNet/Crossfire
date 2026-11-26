@@ -1287,6 +1287,8 @@ public abstract class LevelObjectTests
 
         // Assert
         Assert.Equal((ulong)Status.Internal, third.Status);
+        Assert.Contains("tags", third.Result.AsString);
+        Assert.DoesNotContain(ext.Logs, l => l.Level == 0); // not a failure of the extension: the answer the protocol gives
         Assert.Empty(third.Effects);
         Assert.Equal("banana", Get(ext, a, Obj("mudname")).AsString);
         Assert.Equal("banana", Get(ext, b, Obj("mudname")).AsString);
@@ -1489,5 +1491,38 @@ public abstract class LevelObjectTests
         // Assert
         Assert.Equal(2, again.Count);
         Assert.Contains(ext.Logs.Skip(before), l => l.Text.Contains("too large to show"));
+    }
+
+    [Theory]
+    [InlineData("treasure")]
+    [InlineData("treasurechest")]
+    public void MudAddObject_Given_an_archetype_whose_name_starts_with_treasure_When_called_Then_it_is_an_archetype_and_not_a_list(string name)
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make());
+
+        // Act
+        ReplyFrame r = ext.Call(Manifest.OpMudAddObject, new[] { N(1), N(1), S(name) }, level: "main.nw");
+
+        // Assert
+        Assert.Equal(ValKind.Handle, r.Result.Kind);
+        Assert.Single(r.Effects);
+    }
+
+    [Fact]
+    public void Set_Given_an_empty_title_after_a_title_When_saved_Then_the_field_is_cleared_and_not_an_empty_text()
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make());
+        ulong h = Add(ext, "main.nw", "banana");
+        Set(ext, h, Obj("mudtitle"), S("of Doom"));
+        ReplyFrame cleared = Set(ext, h, Obj("mudtitle"), S(""));
+
+        // Act
+        string text = Flushed(ext, "levels/main.nw.map");
+
+        // Assert
+        Assert.Equal("", cleared.Result.AsString);
+        Assert.DoesNotContain("title", text);
     }
 }

@@ -74,6 +74,10 @@ public abstract class AccountTests
         Assert.Equal("10", sets.Single(e => e.Get("name")!.AsString == "clientr.mud_hp").Get("value")!.AsString);
         Assert.Equal("999", sets.Single(e => e.Get("name")!.AsString == "clientr.mud_food").Get("value")!.AsString);
         Assert.Equal(Names(r, "client.set").Distinct().Count(), sets.Count);
+        Assert.Equal(
+            new[] { "ac", "cha", "con", "dam", "dex", "exp", "food", "grace", "hp", "int", "level", "luck", "maxgrace", "maxhp", "maxsp", "pow", "sp", "speed", "str", "wc", "weight", "wis" }
+                .Select(n => "clientr.mud_" + n),
+            Names(r, "client.set").OrderBy(n => n, StringComparer.Ordinal));
         Val ev = Assert.Single(r.Events);
         Assert.Equal("onLoadedMudAccount", ev.Get("name")!.AsString);
         Assert.Equal("player", ev.Get("target")!.AsString);
@@ -396,6 +400,7 @@ public abstract class AccountTests
         {
             // Act
             ReplyFrame first = Login(ext, "bob");
+            int logsAfterFirst = ext.Logs.Count;
             ReplyFrame second = Login(ext, "bob");
             ext.Call(6, new[] { S("bob") });
             ext.Call(3);
@@ -404,6 +409,7 @@ public abstract class AccountTests
             Assert.True(first.Result.IsNil);
             Assert.True(second.Result.IsNil);
             Assert.Empty(first.Effects);
+            Assert.Equal(logsAfterFirst, ext.Logs.Count); // the second login did not read the file again
         }
         Assert.Equal(content, File.ReadAllText(path));
         world.Dispose();
