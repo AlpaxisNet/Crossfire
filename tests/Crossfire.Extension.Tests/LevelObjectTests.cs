@@ -533,6 +533,68 @@ public abstract class LevelObjectTests
         Assert.Equal(new[] { 64, 64, 22 }, pages);
     }
 
+    // ------------------------------------------------------------------ strings with line breaks (review of ext-objects, finding 1)
+
+    [Theory]
+    [InlineData("img")]
+    [InlineData("npcparam")]
+    [InlineData("mudgraalparam")]
+    [InlineData("restrictaccess")]
+    [InlineData("mudrealname")]
+    [InlineData("mudtitle")]
+    [InlineData("mudslaying")]
+    [InlineData("mudrace")]
+    public void Set_Given_a_text_with_a_line_break_When_set_Then_it_is_refused_and_the_saved_level_gains_no_object(string member)
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make());
+        ulong banana = Add(ext, "lv.nw", "banana");
+
+        // Act
+        ReplyFrame viaNewline = Set(ext, banana, Obj(member), S("a\nend\narch sword\nx 9\ny 9\nend\narch map\n"));
+        ReplyFrame viaReturn = Set(ext, banana, Obj(member), S("a\rb"));
+        string text = Flushed(ext, "levels/lv.nw.map");
+
+        // Assert
+        Assert.NotEqual(0UL, viaNewline.Status);
+        Assert.NotEqual(0UL, viaReturn.Status);
+        Assert.DoesNotContain("arch sword", text);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(text, "(?m)^arch map$"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(text, "(?m)^arch banana$"));
+    }
+
+    [Fact]
+    public void Set_Given_a_one_line_text_When_set_Then_it_is_stored()
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make());
+        ulong banana = Add(ext, "lv.nw", "banana");
+
+        // Act
+        ReplyFrame r = Set(ext, banana, Obj("mudrealname"), S("Excalibur"));
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.Equal("Excalibur", Get(ext, banana, Obj("mudrealname")).AsString);
+    }
+
+    [Fact]
+    public void MudAddObject_Given_a_level_name_with_line_breaks_When_saved_Then_the_header_holds_no_lines_of_its_own()
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make());
+        string level = "lv\nwidth 1\nend\narch sword";
+        Add(ext, level, "banana");
+
+        // Act
+        string text = Flushed(ext, FileNames.LevelFile(level)!);
+
+        // Assert
+        Assert.DoesNotContain("\narch sword", text);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(text, "(?m)^width "));
+        Assert.DoesNotContain("\nwidth 1\n", text);
+    }
+
     // ------------------------------------------------------------------ mudaddobject and mudaddspecialobject
 
     [Fact]

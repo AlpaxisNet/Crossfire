@@ -187,6 +187,12 @@ internal sealed class FieldBuilder<T>
             return SetResult.Ok(Val.Float(get(ob)));
         }, client);
 
+    /// <summary>Why a text with a line break is refused: the object is saved as lines, and a break in a value would write lines of its own into the file.</summary>
+    public const string LineBreakRefused = "the member takes a text on one line (no newline or carriage return)";
+
+    /// <summary>Whether a text holds a newline or a carriage return.</summary>
+    public static bool HasLineBreak(string text) => text.AsSpan().IndexOfAny('\n', '\r') >= 0;
+
     /// <summary>A text field (the text of a file holds the bytes of UTF-8, one char per byte: <see cref="FileText"/>).</summary>
     public void Str(string name, Func<CfObject, string?> get, Action<CfObject, string>? set, bool stable, string? client = null) =>
         Add(name, "string", set != null, stable, (_, t) => Val.Str(FileText.FromBytesText(get(of(t)) ?? "")), set == null ? null : (_, t, v) =>
@@ -194,6 +200,10 @@ internal sealed class FieldBuilder<T>
             if (!v.IsNil && v.Kind != ValKind.String)
             {
                 return SetResult.Fail("the member takes a string");
+            }
+            if (HasLineBreak(v.AsString))
+            {
+                return SetResult.Fail(LineBreakRefused);
             }
             CfObject ob = of(t);
             set(ob, FileText.ToBytesText(v.AsString));
@@ -268,7 +278,7 @@ internal sealed class FieldBuilder<T>
         Int("mudintelligence", o => o.Stats.Int, (o, n) => o.Stats.Int = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_int");
         Int("mudpower", o => o.Stats.Pow, (o, n) => o.Stats.Pow = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_pow");
         Int("mudcharm", o => o.Stats.Cha, (o, n) => o.Stats.Cha = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_cha");
-        Int("mudcharisma", o => o.Stats.Cha, (o, n) => o.Stats.Cha = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_cha");
+        Int("mudcharisma", o => o.Stats.Cha, (o, n) => o.Stats.Cha = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, false, "clientr.mud_cha");
         Str("mudrealname", o => o.Name, (o, s) => o.Name = s, stable);
         Str("mudtitle", o => o.Title, (o, s) => o.Title = s.Length == 0 ? null : s, stable);
         Str("mudslaying", o => o.Slaying, (o, s) => o.Slaying = s.Length == 0 ? null : s, stable);

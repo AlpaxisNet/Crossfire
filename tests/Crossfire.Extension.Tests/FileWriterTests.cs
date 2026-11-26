@@ -136,6 +136,28 @@ public class FileWriterTests
     }
 
     [Fact]
+    public void IsIdle_Given_a_pending_file_When_asked_Then_false_and_no_write_is_forced_and_true_after_the_write()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        FileWriter writer = Make(folder, new FileWriterOptions { Quiet = TimeSpan.FromHours(1), MaxDelay = TimeSpan.FromHours(1) });
+        Assert.True(writer.IsIdle());
+        writer.Submit("a.txt", Bytes("x"));
+
+        // Act
+        bool idle = writer.IsIdle();
+        Thread.Sleep(200);
+        bool written = File.Exists(Path.Combine(folder.Path, "a.txt"));
+        writer.Kick();
+
+        // Assert
+        Assert.False(idle);
+        Assert.False(written);
+        Assert.True(WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")) && writer.IsIdle()));
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
     public void WaitWritten_Given_nothing_submitted_When_waited_Then_true_at_once()
     {
         // Arrange

@@ -38,6 +38,10 @@ internal static class TMudObjectMembers
             {
                 return SetResult.Fail("the member takes a string");
             }
+            if (FieldBuilder<LevelObject>.HasLineBreak(v.AsString))
+            {
+                return SetResult.Fail(FieldBuilder<LevelObject>.LineBreakRefused);
+            }
             string bytes = FileText.ToBytesText(v.AsString);
             if (bytes.Length == 0)
             {
@@ -51,9 +55,9 @@ internal static class TMudObjectMembers
         });
         b.Int("mudtype", o => o.Type, null, 0, 0, true);
         b.ExtraInt("mudgraaltype", "graalnpctype", -1, true, true);
-        b.ExtraInt("npctype", "graalnpctype", -1, true, true);
+        b.ExtraInt("npctype", "graalnpctype", -1, true, false); // an alias of mudgraaltype: only one of the two may be stable (protocol 6.1)
         b.ExtraStr("mudgraalparam", "graalnpcparam", true, true);
-        b.ExtraStr("npcparam", "graalnpcparam", true, true);
+        b.ExtraStr("npcparam", "graalnpcparam", true, false); // an alias of mudgraalparam
 
         // life, stats, names (shared with the player)
         b.SharedLife(stable: true);

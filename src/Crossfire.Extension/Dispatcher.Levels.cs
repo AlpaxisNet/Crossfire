@@ -26,7 +26,7 @@ internal sealed partial class Dispatcher
     {
         recent[relativePath] = content;
         writer!.Submit(relativePath, content);
-        if (recent.Count > RecentLimit && writer.WaitWritten(TimeSpan.Zero))
+        if (recent.Count > RecentLimit && writer.IsIdle())
         {
             recent.Clear();
         }
@@ -135,7 +135,7 @@ internal sealed partial class Dispatcher
     private Level NewLevel(string name)
     {
         var level = new Level(name) { Source = "new" };
-        level.Header.Name = FileText.ToBytesText(name);
+        level.Header.Name = FileText.EscapeLine(FileText.ToBytesText(name));
         levels[name] = level;
         return level;
     }

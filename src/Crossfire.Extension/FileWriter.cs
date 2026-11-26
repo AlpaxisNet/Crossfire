@@ -86,6 +86,18 @@ internal sealed partial class FileWriter
         }
     }
 
+    /// <summary>
+    /// Whether everything submitted is on disk: nothing pending or being written, no file given up. A pure query: it neither forces a
+    /// write nor clears an earlier failure (unlike <see cref="WaitWritten"/>).
+    /// </summary>
+    public bool IsIdle()
+    {
+        lock (gate)
+        {
+            return pending.Count == 0 && written >= submitted && dropped == 0;
+        }
+    }
+
     /// <summary>Asks for a write now instead of after the quiet time, and returns at once.</summary>
     public void Kick()
     {

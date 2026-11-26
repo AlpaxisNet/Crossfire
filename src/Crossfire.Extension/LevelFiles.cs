@@ -112,7 +112,7 @@ internal static class LevelFiles
         {
             world.LoadMapHeader(src, level.Header);
         }
-        level.Header.Name ??= FileText.ToBytesText(name);
+        level.Header.Name ??= FileText.EscapeLine(FileText.ToBytesText(name));
         string rest = RenamePositions(text.Substring(src.Pos));
 
         var collected = new List<CfObject>();

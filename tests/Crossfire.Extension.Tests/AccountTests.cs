@@ -306,8 +306,6 @@ public abstract class AccountTests
     [InlineData("..")]
     [InlineData("name with spaces")]
     [InlineData("Ünïcode名前")]
-    [InlineData("tab\tnew\nline")]
-    [InlineData("nul\0inside")]
     [InlineData("x.tmp")]
     [InlineData("pc:1234567890")]
     public void Player_Given_account_names_with_bytes_a_file_name_cannot_hold_When_logged_in_and_out_Then_each_has_its_own_file_inside_the_accounts_folder_and_reads_back(string account)
@@ -538,6 +536,54 @@ public abstract class AccountTests
         // Assert
         Assert.Equal(new[] { 10L, 1L }, many.Result.Items.Select(v => v.AsInt));
         Assert.Equal((ulong)Status.BadArgs, wrong.Status);
+    }
+
+    // ------------------------------------------------------------------ names with control characters, many logouts (review of ext-objects, findings 2 and 4)
+
+    [Theory]
+    [InlineData("evil\nlevel 50")]
+    [InlineData("evil\nhp 77\nend")]
+    [InlineData("a\rb")]
+    [InlineData("tab\there")]
+    public void PlayerLogin_Given_an_account_name_with_a_control_character_When_called_Then_nil_one_log_line_and_no_file(string account)
+    {
+        // Arrange
+        TempFolder world = ObjectWorld.Make();
+        using IExt ext = Start(world);
+
+        // Act
+        ReplyFrame r = Login(ext, account);
+        Flushed(ext, "session.json");
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.True(r.Result.IsNil);
+        Assert.Empty(r.Effects);
+        Assert.Contains(ext.Logs, l => l.Text.Contains("control character"));
+        Assert.False(Directory.Exists(Path.Combine(world.Path, "data", "accounts")) && Directory.GetFiles(Path.Combine(world.Path, "data", "accounts")).Length > 0);
+    }
+
+    [Fact]
+    public void PlayerLogout_Given_many_accounts_and_a_long_quiet_time_When_each_logs_out_Then_nothing_is_written_before_the_quiet_time()
+    {
+        // Arrange
+        TempFolder world = ObjectWorld.Make();
+        var options = new ExtensionOptions { Writer = new FileWriterOptions { Quiet = TimeSpan.FromHours(1), MaxDelay = TimeSpan.FromHours(1) } };
+        using IExt ext = Start(world, options);
+
+        // Act
+        for (int i = 0; i < 60; i++)
+        {
+            Login(ext, "acc" + i);
+            ext.Call(6, new[] { S("acc" + i) });
+        }
+        Thread.Sleep(400);
+
+        // Assert
+        string folder = Path.Combine(world.Path, "data", "accounts");
+        Assert.True(!Directory.Exists(folder) || Directory.GetFiles(folder).Length == 0);
+        ReplyFrame again = Login(ext, "acc0");
+        Assert.Equal(ValKind.Handle, again.Result.Kind);
     }
 }
 

@@ -48,6 +48,25 @@ public class ManifestAndMemberTests
 
     // ------------------------------------------------------------------ the manifest (section 6)
 
+    [Theory]
+    [InlineData("TMudObject", "mudgraaltype", "npctype")]
+    [InlineData("TMudObject", "mudgraalparam", "npcparam")]
+    [InlineData("TMudObject", "mudcharm", "mudcharisma")]
+    [InlineData("TMudPlayer", "mudcharm", "mudcharisma")]
+    public void Build_Given_two_writable_members_of_one_field_When_listed_Then_at_most_one_is_stable(string type, string a, string b)
+    {
+        // Arrange
+        Val t = Manifest.Build().Get("types")!.Items.Single(x => x.Get("name")!.AsString == type);
+
+        // Act
+        Val ma = t.Get("members")!.Items.Single(m => m.Get("name")!.AsString == a);
+        Val mb = t.Get("members")!.Items.Single(m => m.Get("name")!.AsString == b);
+
+        // Assert (protocol 6.1: a stable member changes only through a set of that same member)
+        Assert.False(ma.Get("stable")!.AsBool && mb.Get("stable")!.AsBool);
+    }
+
+
     [Fact]
     public void Build_Given_the_manifest_When_checked_against_section_6_Then_it_is_valid()
     {

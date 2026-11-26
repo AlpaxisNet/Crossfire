@@ -42,7 +42,7 @@ internal sealed partial class Dispatcher
 
     /// <summary>
     /// The player of an account: read from its file, or made new (from the first player archetype, as Crossfire's
-    /// <c>get_player_archetype</c> chooses it). Null, with a log line, for an account name that cannot be a file name, a file that
+    /// <c>get_player_archetype</c> chooses it). Null, with a log line, for an account name that cannot be a file name or holds a control character, a file that
     /// cannot be read (it is never written over) or a world without a player archetype.
     /// </summary>
     private PlayerState? OpenPlayer(string account)
@@ -51,6 +51,12 @@ internal sealed partial class Dispatcher
         if (rel == null)
         {
             log(1, "player.login: the account name cannot be made a file name (empty, or its escaped form is over " + FileNames.MaxEscapedLength + " bytes)");
+            return null;
+        }
+        if (account.Any(c => c < 0x20 || c == 0x7f))
+        {
+            // the name is written into the account's file as the player's name: a line break or another control character would write lines of its own
+            log(1, "player.login: the account name holds a control character, it is refused");
             return null;
         }
         if (refused.Contains("account:" + account))

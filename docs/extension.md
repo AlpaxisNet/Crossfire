@@ -192,7 +192,7 @@ row that is not is `bad_args` and nothing is applied. A row for a dead, unknown 
   Crossfire's `get_player_archetype`), named after the account. The reply is the handle (type `TMudPlayer`) and carries a `client.set`
   for each string of the player's life and stats (below) and the event `onLoadedMudAccount`. A second login without a logout gives
   the same handle, sends the strings again and fires no second event. `nil` (and a log line) when the world has no player
-  archetype, the name is empty or its escaped form is over 200 bytes, or the file exists and holds no player (it is never written
+  archetype, the name is empty, holds a control character (below 0x20 or 0x7f: the name is written into the file as the player's name, and a line break would write lines of its own) or its escaped form is over 200 bytes, or the file exists and holds no player (it is never written
   over). The file's name decides which account it is: an `account` line that names another is only logged.
 - **The strings** (`clientr.mud_<name>` of players.md 3.2): `hp maxhp sp maxsp grace maxgrace food exp level str dex con int wis pow
   cha luck speed weight ac wc dam`; the table of members says which member has which. A `set` of such a member changes its string
@@ -444,6 +444,14 @@ experience (`mudhp` ... `mudexp`, `mudfood`, `mudlevel`, regeneration and combat
 `confused`, `blind`, `undead`, `flying`) and the derived names `fullname` and `mudfullname`. Every member of a player but `mudid` and
 `ismudobject` is not stable (the player's rules recompute them).
 
+Of two members that name one field (`mudgraaltype` and `npctype`, `mudgraalparam` and `npcparam`, `mudcharm` and `mudcharisma`) only
+the first is stable: a set of the other would change a value the host cached for the first.
+
+**Texts on one line.** A `set` of a text member of a level object (`img`, `npcparam`, `mudgraalparam`, `restrictaccess`,
+`mudrealname`, `mudtitle`, `mudslaying`, `mudrace`) whose value holds a newline or a carriage return is refused (status "bad
+arguments" with the reason): the object is saved as lines, and a break in a value would write lines of a script's choosing into the
+level file. The same for a player's text members.
+
 **Names.** A name that is a built-in property of the host's NPCs or players makes the host refuse the manifest (protocol 6.1). The
 names are those Graal Kingdoms' scripts use (objects.md 5.5, 5.6); a name the host turns out to refuse is renamed in
 this table only with that evidence (the end-to-end run of `scripts/e2e-with-suite.sh` checks the host at hand).
@@ -467,9 +475,9 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `img` | 207 | string | rw | yes | extra line `mudimg` when a script set one, else the icon | 3.3: INFERRED, 141 reads and 33 writes in 77 files; GK writes it |
 | `mudtype` | 208 | int | r | yes | `ob->type` | 4.4, 5.5: read only |
 | `mudgraaltype` | 209 | int | rw | yes | extra line `graalnpctype` (-1 when absent) | 4.5, 5.5; written by GK's staff item tool |
-| `npctype` | 210 | int | rw | yes | extra line `graalnpctype` (-1 when absent) | 4.5: GK reads both names |
+| `npctype` | 210 | int | rw | no | extra line `graalnpctype` (-1 when absent) | 4.5: GK reads both names; not stable: an alias of `mudgraaltype`, which is the stable one (protocol 6.1: a stable member changes only through a set of that same member) |
 | `mudgraalparam` | 211 | string | rw | yes | extra line `graalnpcparam` ("" when absent) | 4.5, 5.5 |
-| `npcparam` | 212 | string | rw | yes | extra line `graalnpcparam` ("" when absent) | 4.5: GK reads both names |
+| `npcparam` | 212 | string | rw | no | extra line `graalnpcparam` ("" when absent) | 4.5: GK reads both names; not stable: an alias of `mudgraalparam`, which is the stable one (protocol 6.1: a stable member changes only through a set of that same member) |
 | `mudlevel` | 213 | int | rw | no | `ob->level` | 5.5; written by GK's staff tool; not stable (the experience rules of phase 4 change it). Client string `clientr.mud_level`. |
 | `mudhp` | 214 | int | rw | no | `ob->stats.hp` | 5.5: EVIDENCED, 354 writes; not stable (regeneration, combat). Client string `clientr.mud_hp`. |
 | `mudmaxhp` | 215 | int | rw | no | `ob->stats.maxhp` | 5.5: 243 writes. Client string `clientr.mud_maxhp`. |
@@ -495,7 +503,7 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `mudintelligence` | 235 | int | rw | yes | `ob->stats.Int` | 5.5. Client string `clientr.mud_int`. |
 | `mudpower` | 236 | int | rw | yes | `ob->stats.Pow` | 5.5. Client string `clientr.mud_pow`. |
 | `mudcharm` | 237 | int | rw | yes | `ob->stats.Cha` | 5.5: the item tool and GK write `mudcharm`. Client string `clientr.mud_cha`. |
-| `mudcharisma` | 238 | int | rw | yes | `ob->stats.Cha` | 5.5: alias; the identification list names `mudcharisma`. Client string `clientr.mud_cha`. |
+| `mudcharisma` | 238 | int | rw | no | `ob->stats.Cha` | 5.5: alias; the identification list names `mudcharisma`. Client string `clientr.mud_cha`; not stable: an alias of `mudcharm`, which is the stable one (protocol 6.1: a stable member changes only through a set of that same member) |
 | `mudrealname` | 239 | string | rw | yes | `ob->name` | 5.5: 22 writes (GK prefixes enchant names); `name_pl` is left as it is |
 | `mudtitle` | 240 | string | rw | yes | `ob->title` | 5.5: writable |
 | `mudslaying` | 241 | string | rw | yes | `ob->slaying` | 5.5: the key text, the pet race, the effect list |
