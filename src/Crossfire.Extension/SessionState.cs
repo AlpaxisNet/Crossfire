@@ -55,11 +55,21 @@ internal sealed class SessionState
     private readonly DateTimeOffset started;
     private DateTimeOffset? initialized;
 
-    public SessionState(TimeProvider time)
+    public SessionState(TimeProvider time, int linkMinor = 0)
     {
         this.time = time;
+        LinkMinor = linkMinor;
         started = time.GetUtcNow();
     }
+
+    /// <summary>
+    /// The link's minor version (protocol section 4.1): the smaller of the host's and the extension's <c>proto_minor</c>, known from the
+    /// host's HELLO on. Every 1.1 addition (an effect, an event target, a manifest key) is for a link where it is at least 1.
+    /// </summary>
+    public int LinkMinor { get; }
+
+    /// <summary>True when the link speaks 1.1 or later.</summary>
+    public bool Speaks11 => LinkMinor >= 1;
 
     public long Ticks { get; set; }
 

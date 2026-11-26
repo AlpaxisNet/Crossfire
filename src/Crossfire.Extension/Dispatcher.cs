@@ -55,6 +55,15 @@ internal sealed class ExtensionOptions
 
     /// <summary>The settings of the Graal Kingdoms adaptation (class prefixes, the default class, the cap of objects per level).</summary>
     public GkSettings Gk { get; init; } = new();
+
+    /// <summary>How long the worker waits for the host's answer to a query (protocol section 4.3) before the query fails with <c>internal</c>.</summary>
+    public TimeSpan QueryTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>A test's registrations in the manifest, after every lane's (functions, types and events that only a test needs).</summary>
+    public Action<ManifestBuilder>? ExtraManifest { get; init; }
+
+    /// <summary>Called at the end of a request for each player controller that asked for a flush, after <c>FlushShown</c> (a test's stand-in for lane 4C's flush).</summary>
+    public Action<Dispatcher, PlayerState>? FlushHook { get; init; }
 }
 
 /// <summary>The worker side: one request at a time, in the order they arrive.</summary>
@@ -89,10 +98,15 @@ internal sealed partial class Dispatcher : IMemberEnv
     private bool forwardWorldLog;
     private int worldErrorLines;
 
-    public Dispatcher(HostHello host, int maxFrame, Action<int, string> log, ExtensionOptions options, Counters counters, CancellationToken stopping = default)
+    /// <summary>The manifest of this link (what the HELLO carried): its functions are the operations above 63 that the dispatcher knows.</summary>
+    private readonly ManifestBuilder manifest;
+
+    // manifest: the one the HELLO carried; made from the host's minor version when it is null
+    public Dispatcher(HostHello host, int maxFrame, Action<int, string> log, ExtensionOptions options, Counters counters, CancellationToken stopping = default, ManifestBuilder? manifest = null)
     {
         this.stopping = stopping;
-        session = new SessionState(options.Time);
+        session = new SessionState(options.Time, host.LinkMinor);
+        this.manifest = manifest ?? Manifest.Collect(host.LinkMinor, options.ExtraManifest);
         this.host = host;
         this.maxFrame = maxFrame;
         this.log = log;
@@ -105,7 +119,25 @@ internal sealed partial class Dispatcher : IMemberEnv
     /// <summary>True after the REPLY to <c>session.init</c> was made with status 0.</summary>
     public bool Initialized { get; private set; }
 
+    /// <summary>The link's minor version (protocol section 4.1); every part of the extension reads it here.</summary>
+    public int LinkMinor => session.LinkMinor;
+
+    /// <summary>True when the link speaks 1.1: the 1.1 effects, event targets and keys are for such a link only.</summary>
+    public bool Speaks11 => session.Speaks11;
+
+    /// <summary>
+    /// While not null, the extension is busy (saving or recovering: lane 4F sets it): a function the manifest declares <c>slow</c>
+    /// answers error 7 <c>busy</c> with this text, before it changes anything (docs/mud-phase3.md section 3, rule 10). A method or
+    /// an operation that changes items or money and is not such a function calls <see cref="CheckBusy"/> first. Worker only.
+    /// </summary>
+    public string? Busy { get; set; }
+
+    /// <summary>The <c>busy</c> answer of an operation that changes items or money, or null when the extension is not busy.</summary>
+    public Outcome? CheckBusy() => Busy is { } why ? Outcome.Fail(Status.Busy, why) : null;
+
     CfWorld IMemberEnv.World => world!;
+
+    internal CfWorld? WorldOrNull => world;
 
     ulong IMemberEnv.HandleOf(object target) => handles.HandleOf(target);
 
@@ -120,6 +152,7 @@ internal sealed partial class Dispatcher : IMemberEnv
         // forget, and dead or unknown handles are ignored.
         effects.Clear();
         events.Clear();
+        flushed.Clear();
         worldErrorLines = 0;
         ctxLevel = req.Ctx.Get("level") is { Kind: ValKind.String } l ? LevelKey(l.AsString) : null;
         ctxPlayer = req.Ctx.Get("player") is { Kind: ValKind.String } p ? p.AsString : null;
@@ -128,6 +161,11 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             options.BeforeOperation?.Invoke(req.Op);
             outcome = Dispatch(req);
+            if (outcome.Status == Status.Ok)
+            {
+                // the one flush of the request, before the REPLY is built (docs/mud-phase3.md section 5); after an error nothing is sent
+                FlushControllers();
+            }
         }
         catch (TagsUsedUpException)
         {
@@ -149,6 +187,7 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             counters.CountError();
             reply = new ReplyFrame(req.ReqId, (ulong)Status.TooLarge, Val.Str("the answer does not fit in a frame"), Array.Empty<Val>(), Array.Empty<Val>());
+            ForgetFlushed(); // the strings of this flush never left: the next flush sends them again
         }
         return reply;
     }
@@ -195,6 +234,8 @@ internal sealed partial class Dispatcher : IMemberEnv
                 return req.Args.Count == 0 ? Outcome.Ok(Stats()) : Outcome.Fail(Status.BadArgs, "stats takes no arguments");
             case 16:
                 return ObjectsBlobs(req.Args);
+            case 17 when Speaks11:
+                return GmapLayoutOp(req.Args);
             case Manifest.OpFindArchetype:
                 return FindArchetype(req.Args, byRealName: false);
             case Manifest.OpFindArchetypeByRealName:
@@ -204,6 +245,11 @@ internal sealed partial class Dispatcher : IMemberEnv
             case Manifest.OpMudAddSpecialObject:
                 return MudAddSpecialObject(req.Args);
             default:
+                if (manifest.FindFunction((long)req.Op) is { Handler: { } handler } function)
+                {
+                    // a lane's function: a slow one answers busy before it can change anything (rule 10 of docs/mud-phase3.md section 3)
+                    return function.Slow && CheckBusy() is { } busy ? busy : handler(this, req.Args);
+                }
                 // 2 without wants_tick (the host must not send it), 17 to 63 (reserved) and the manifest's other ids
                 return Outcome.Fail(Status.UnknownOp, "unknown operation " + req.Op);
         }
@@ -247,10 +293,12 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             return Outcome.Fail(Status.Internal, "the world has no Arch folder");
         }
-        gk = new GkHost();
+        gk = new GkHost { Items = this };
         var w = new CfWorld(gk, WorldLog);
+        PrepareStartPath(w);
         ArchCollection collection = ArchCollector.Collect(arch);
         w.InitArchetypes(collection.Archetypes);
+        InitSkills(w);
 
         int count = 0;
         int parts = 0;
@@ -408,6 +456,9 @@ internal sealed partial class Dispatcher : IMemberEnv
         public abstract SetResult Write(Val v);
 
         public virtual string? ClientName => null;
+
+        /// <summary>For a member that is a list of handles: the objects of the list; null for any other member.</summary>
+        public virtual IReadOnlyList<CfObject>? Items() => null;
     }
 
     private sealed class BoundArch : Bound
@@ -450,6 +501,8 @@ internal sealed partial class Dispatcher : IMemberEnv
         public override SetResult Write(Val v) => member.Write!(env, target, v);
 
         public override string? ClientName => member.ClientName;
+
+        public override IReadOnlyList<CfObject>? Items() => member.Items?.Invoke(env, target);
     }
 
     /// <summary>The member of that id on a target (an archetype, a level object or a player), or null when the target's type has none.</summary>
@@ -543,9 +596,42 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             return Outcome.Fail(Status.BadArgs, "get_list takes a handle, a member id and a list of field ids");
         }
-        // no member of the manifest has the type list:handle:<type> yet (the inventories are a later phase)
-        return WithTarget(args[0], t => Outcome.Fail(Status.BadArgs,
-            BindMember(t, id) == null ? "unknown member " + id : "member " + id + " is not a list of handles"));
+        var fields = new List<long>();
+        foreach (Val v in args[2].Items)
+        {
+            if (v.AsNumberToInt() is not { } field || TMudObjectMembers.Table.Find(field) is null)
+            {
+                return Outcome.Fail(Status.BadArgs, "a field id is not a member of TMudObject");
+            }
+            fields.Add(field);
+        }
+        return WithTarget(args[0], t =>
+        {
+            if (BindMember(t, id) is not { } m)
+            {
+                return Outcome.Fail(Status.BadArgs, "unknown member " + id);
+            }
+            if (m.Items() is not { } items)
+            {
+                return Outcome.Fail(Status.BadArgs, "member " + id + " is not a list of handles");
+            }
+            if (items.Count > manifest.MaxList)
+            {
+                return Outcome.Fail(Status.TooLarge, "the list has " + items.Count + " elements, the most get_list gives is " + manifest.MaxList);
+            }
+            var rows = new List<Val>(items.Count);
+            foreach (CfObject item in items)
+            {
+                LevelObject proxy = HolderOf(item) is { } holder ? TagItem(holder, item) : ItemProxy(item);
+                var row = new List<Val>(fields.Count + 1) { Val.Handle(handles.HandleOf(proxy)) };
+                foreach (long field in fields)
+                {
+                    row.Add(BindMember(proxy, field)!.Read());
+                }
+                rows.Add(Val.List(row));
+            }
+            return Outcome.Ok(Val.List(rows));
+        });
     }
 
     private Outcome Invoke(IReadOnlyList<Val> args)
@@ -554,9 +640,12 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             return Outcome.Fail(Status.BadArgs, "invoke takes a handle, a method id and a list");
         }
-        return WithTarget(args[0], t => t is LevelObject lo
-            ? InvokeOnObject(lo, method, args[2].Items)
-            : Outcome.Fail(Status.BadArgs, "unknown method"));
+        return WithTarget(args[0], t => t switch
+        {
+            LevelObject lo => InvokeOnObject(lo, method, args[2].Items),
+            PlayerState ps => InvokeStartMethod(ps, method, args[2].Items) ?? Outcome.Fail(Status.BadArgs, "unknown method"),
+            _ => Outcome.Fail(Status.BadArgs, "unknown method"),
+        });
     }
 
     // ------------------------------------------------------------------ the manifest's functions
@@ -575,6 +664,9 @@ internal sealed partial class Dispatcher : IMemberEnv
         }
         return Outcome.Ok(Val.Handle(handles.HandleOf(at)));
     }
+
+    /// <summary>A number as the call sent it: a float as it is (NaN and the infinities too); null for any other kind but an int and nil, which is 0.</summary>
+    private static double? RawNumber(Val v) => v.Kind == ValKind.Float ? v.AsFloat : AsNumber(v);
 
     /// <summary>The number a value stands for as a script number: an int or a float, nil as 0; null for any other kind.</summary>
     private static double? AsNumber(Val v) => v.Kind switch

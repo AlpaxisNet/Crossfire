@@ -40,8 +40,8 @@ public interface ISpellHandle
 {
 }
 
-/// <summary>include/treasure.h <c>treasurelist</c>: the list an object takes its random items from. Only the name is held here.</summary>
-public sealed class TreasureList
+/// <summary>include/treasure.h <c>treasurelist</c>: the list an object takes its random items from. The name is held here, the rest is in Treasure.cs.</summary>
+public sealed partial class TreasureList
 {
     /// <summary>treasure.h: name.</summary>
     public string Name { get; }

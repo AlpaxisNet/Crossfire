@@ -7,7 +7,7 @@
 namespace Crossfire.Extension.Gk;
 
 /// <summary>The host of the Crossfire world for Graal Kingdoms' archetypes: <see cref="IsLoaderKey"/> names Graal Kingdoms' own keys.</summary>
-internal sealed class GkHost : CrossfireHost
+internal sealed partial class GkHost : CrossfireHost
 {
     /// <summary>The keys of Graal Kingdoms' archetypes that are not Crossfire's.</summary>
     public static readonly IReadOnlyList<string> OwnKeys = new[]
@@ -24,7 +24,7 @@ internal sealed class GkHost : CrossfireHost
     public static readonly IReadOnlyList<string> StateKeys = new[]
     {
         "mudx", "mudy", "mudblob", "mudimg", "randomvar", "marketprice", "account", "mudclass", "mudpeaceful", "mudlastdeath",
-        "mudverbose", "mudlevelcap", "mudwccap", "mudaccap",
+        "mudverbose", "mudlevelcap", "mudwccap", "mudaccap", "mudowner", Player.OrigStatsKey, Player.LevHpKey, Player.LevSpKey, Player.LevGraceKey,
     };
 
     private static readonly HashSet<string> Keys = new(OwnKeys.Concat(StateKeys), StringComparer.OrdinalIgnoreCase);
@@ -32,7 +32,29 @@ internal sealed class GkHost : CrossfireHost
     /// <summary>While a map file is read: the objects that C's <c>load_objects</c> hands to <c>insert_ob_in_map</c>, in file order (a part of a larger object too).</summary>
     public List<CfObject>? Collecting { get; set; }
 
+    /// <summary>The dispatcher that answers what the object model tells the client (lane 4C): the item strings, the lines of text, the fixes.</summary>
+    public Dispatcher? Items { get; set; }
+
     public override bool IsLoaderKey(string key) => Keys.Contains(key);
+
+    public override void EsrvSendItem(CfObject player, CfObject op) => Items?.ItemSent(player, op);
+
+    /// <summary>The string is written whole for every kind of update: the flags of the update say nothing the text does not.</summary>
+    public override void EsrvUpdateItem(int flags, CfObject player, CfObject op) => Items?.ItemSent(player, op);
+
+    public override void EsrvDelItem(IPlayerHandle? player, uint tag) => Items?.ItemDeleted(player);
+
+    // the stats first (lane 4D, GkHost.Start.cs), then the weights and strings the client is shown (lane 4C)
+    public override void FixPlayer(CfObject player)
+    {
+        FixPlayerStats(player);
+        Items?.PlayerFixed(player);
+    }
+
+    public override void DrawInfo(CfObject who, string text) => Items?.DrawInfoTo(who, text);
+
+    public override CfObject? FindBestWeaponUsedMatch(CfObject player, string parameters) =>
+        Items?.WorldOrNull is { } world ? ItemMatching.FindBestWeaponUsedMatch(world, player, parameters) : null;
 
     /// <summary>The object model has no squares: the objects that a map file loads are collected in file order (the extension's own level index).</summary>
     public override CfObject? InsertObInMap(CfObject op, IMapHandle map, CfObject? originator, int flag)

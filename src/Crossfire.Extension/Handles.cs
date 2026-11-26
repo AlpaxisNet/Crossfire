@@ -27,6 +27,9 @@ internal sealed class HandleTable
         this.limit = limit;
     }
 
+    /// <summary>How many tags are alive: an object that gave its tag up is not counted (a flat number over many logins means no tag leaks).</summary>
+    public int Live => tags.Count;
+
     /// <summary>How many tags were given out (dead ones included).</summary>
     public int Issued => slots.Count;
 

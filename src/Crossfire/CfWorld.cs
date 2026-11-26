@@ -106,6 +106,15 @@ public class CrossfireHost
     /// <summary>player.h <c>first_player</c> walk of object.c decrease_ob_nr: the object of the player whose open container is <paramref name="container"/>, or null.</summary>
     public virtual CfObject? FindPlayerWithContainer(CfObject container) => null;
 
+    /// <summary>
+    /// The <c>new_draw_info</c> and <c>new_draw_info_format</c> of the server (common/glue.c's function pointer, socket/info.c): a line
+    /// of text for the player <paramref name="who"/> (flags and colour are not passed: Graal Kingdoms' client colours the text itself).
+    /// This default shows nothing; the extension's host sends it to the player's script (docs/extension.md).
+    /// </summary>
+    public virtual void DrawInfo(CfObject who, string text)
+    {
+    }
+
     /// <summary>The <c>esrv_send_item</c> function pointer of common/glue.c (the client).</summary>
     public virtual void EsrvSendItem(CfObject player, CfObject op)
     {
@@ -165,6 +174,11 @@ public class CrossfireHost
     /// treasure list that have type ABILITY, in the order of the list. The treasure lists are a later phase: default, none.
     /// </summary>
     public virtual IEnumerable<string> TreasureAbilityNames(TreasureList list) => Array.Empty<string>();
+
+    /// <summary>The <c>monster_check_apply_func</c> pointer of common/glue.c (treasure.c <c>put_treasure</c> with GT_APPLY): a monster applies the item it was given. Default: nothing.</summary>
+    public virtual void MonsterCheckApply(CfObject monster, CfObject item)
+    {
+    }
 
     /// <summary>arch.c <c>find_best_weapon_used_match</c> (needs item.c's name matching, not ported).</summary>
     public virtual CfObject? FindBestWeaponUsedMatch(CfObject player, string parameters) => null;

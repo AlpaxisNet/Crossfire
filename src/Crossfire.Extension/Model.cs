@@ -19,7 +19,8 @@ internal sealed class LevelObject
         Ob = ob;
     }
 
-    public Level Level { get; }
+    /// <summary>The level the object is in; <see cref="Level.Inventory"/> for an object in an inventory (lane 4C: it has a tag, no NPC); the lane that moves it to a level sets this.</summary>
+    public Level Level { get; set; }
 
     public CfObject Ob { get; }
 
@@ -43,6 +44,9 @@ internal sealed class LevelObject
 /// <summary>A level the extension holds the objects of (the map of Crossfire's <c>load_objects</c> and <c>save_objects</c>).</summary>
 internal sealed class Level : IMapHandle
 {
+    /// <summary>The place of the objects that are in an inventory and not in a level: never loaded, never saved, in no table.</summary>
+    public static readonly Level Inventory = new("(inventory)");
+
     public Level(string name)
     {
         Name = name;
@@ -71,13 +75,24 @@ internal sealed class PlayerState
     public PlayerState(string account, CfObject ob)
     {
         Account = account;
+        FileKey = account;
         Ob = ob;
     }
 
     /// <summary>The account name as the host gave it (compared as bytes).</summary>
     public string Account { get; }
 
-    public CfObject Ob { get; }
+    /// <summary>The name the account's file has (<see cref="Account"/> and, after <c>loadmudaccount</c> with a suffix, the suffix): the file the player is read from and saved to.</summary>
+    public string FileKey { get; set; }
+
+    /// <summary>The player's object. It is replaced when an account is loaded again (<c>loadmudaccount</c>); the handle of the player stays.</summary>
+    public CfObject Ob { get; set; }
+
+    /// <summary>False after <c>unloadmudaccount</c> until the account is loaded again: the memory state was dropped, and the file is not written over.</summary>
+    public bool Loaded { get; set; } = true;
+
+    /// <summary>The player's controller (C <c>contr</c>), set while the player is logged in.</summary>
+    public Gk.Player? Contr => Ob.Contr as Gk.Player;
 
     public bool Dirty { get; set; }
 

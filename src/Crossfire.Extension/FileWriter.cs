@@ -25,6 +25,12 @@ internal sealed class FileWriterOptions
 
     /// <summary>After this many failed passes in a row the files that could not be written are given up (counted, logged once).</summary>
     public int MaxFailedPasses { get; init; } = 8;
+
+    /// <summary>
+    /// Called on the writer thread between the two writes of a move (<see cref="FileWriter.SubmitMove"/>): the source file is on disk,
+    /// the destination is not yet (a test stops or kills the process here). Arguments: the source and the destination path.
+    /// </summary>
+    public Action<string, string>? BetweenMove { get; init; }
 }
 
 /// <summary>
@@ -45,6 +51,7 @@ internal sealed partial class FileWriter
 
     private Dictionary<string, byte[]> pending = new();           // files not yet tried: written by the quiet time
     private readonly Dictionary<string, Retry> retrying = new(); // files whose last write failed: each waits its own back-off
+    private readonly List<Move> moves = new();                   // moves (source file, then destination file) not yet written, oldest first
     private long submitted;       // the number of the last submission
     private long written;         // every submission up to this number is on disk (or was discarded)
     private long failed;          // the last submission that a failed pass could not write
@@ -73,6 +80,32 @@ internal sealed partial class FileWriter
         public long At { get; }
     }
 
+    /// <summary>A move across two files: both are written in one pass, the source first, the destination only when the source is on disk.</summary>
+    private sealed class Move
+    {
+        public Move(string source, byte[] sourceContent, string destination, byte[] destinationContent)
+        {
+            Source = source;
+            SourceContent = sourceContent;
+            Destination = destination;
+            DestinationContent = destinationContent;
+        }
+
+        public string Source { get; }
+
+        public byte[] SourceContent { get; set; }
+
+        public string Destination { get; }
+
+        public byte[] DestinationContent { get; set; }
+
+        /// <summary>How many passes failed to write the source in a row.</summary>
+        public int Passes { get; set; }
+
+        /// <summary>When it may be written (0: at once).</summary>
+        public long At { get; set; }
+    }
+
     public FileWriter(string root, FileWriterOptions options, Counters counters, Action<int, string> log)
     {
         this.root = root;
@@ -91,7 +124,20 @@ internal sealed partial class FileWriter
         lock (gate)
         {
             long now = Stopwatch.GetTimestamp();
-            if (retrying.TryGetValue(relativePath, out Retry? waiting))
+            Move? inMove = moves.FirstOrDefault(m => m.Source == relativePath || m.Destination == relativePath);
+            if (inMove != null)
+            {
+                // a move that waits for its turn keeps its order; the newest content of either file is what it writes
+                if (inMove.Source == relativePath)
+                {
+                    inMove.SourceContent = content;
+                }
+                else
+                {
+                    inMove.DestinationContent = content;
+                }
+            }
+            else if (retrying.TryGetValue(relativePath, out Retry? waiting))
             {
                 waiting.Content = content; // the newest content, tried when the file's own back-off is over
             }
@@ -110,6 +156,51 @@ internal sealed partial class FileWriter
     }
 
     /// <summary>
+    /// A move that crosses two files (an item from a level file to an account file, the other way, or between two accounts): hands the
+    /// writer the whole new content of both and has them written at once, not after the quiet time, in one pass and in this order:
+    /// the source file first, the destination file second, and the destination only when the source is on disk. A crash between the two
+    /// writes can lose what was moved (the source no longer has it, the destination does not yet), never copy it (the destination is
+    /// never on disk before the source). A move whose source write fails does not write the destination: it waits with the file's
+    /// own back-off and is given up after <see cref="FileWriterOptions.MaxFailedPasses"/> passes like any file; a failure of the
+    /// destination write after the source was written is that file's own failure (it is tried again alone, with the same back-off).
+    /// Older submissions of the two files are replaced; a later <see cref="Submit"/> of either file replaces its content in the move.
+    /// Moves are written in the order they were submitted, before the ordinary files of the same pass. The two paths must differ.
+    /// </summary>
+    public void SubmitMove(string sourcePath, byte[] sourceContent, string destinationPath, byte[] destinationContent)
+    {
+        CheckPath(sourcePath);
+        CheckPath(destinationPath);
+        if (sourcePath == destinationPath)
+        {
+            throw new ArgumentException("a move needs two files: " + sourcePath, nameof(destinationPath));
+        }
+        lock (gate)
+        {
+            // an older submission of either file is superseded: left behind, it could be written (in the wrong order) with the move
+            foreach (string path in new[] { sourcePath, destinationPath })
+            {
+                pending.Remove(path);
+                retrying.Remove(path);
+                foreach (Move other in moves.Where(m => m.Source == path || m.Destination == path).ToList())
+                {
+                    // an older move of the same file keeps its place in the queue but writes what the newer move says for it
+                    if (other.Source == path)
+                    {
+                        other.SourceContent = path == sourcePath ? sourceContent : destinationContent;
+                    }
+                    else
+                    {
+                        other.DestinationContent = path == sourcePath ? sourceContent : destinationContent;
+                    }
+                }
+            }
+            moves.Add(new Move(sourcePath, sourceContent, destinationPath, destinationContent));
+            submitted++;
+            Monitor.PulseAll(gate);
+        }
+    }
+
+    /// <summary>
     /// Whether everything submitted is on disk: nothing pending or being written, no file given up. A pure query: it neither forces a
     /// write nor clears an earlier failure (unlike <see cref="WaitWritten"/>).
     /// </summary>
@@ -117,7 +208,7 @@ internal sealed partial class FileWriter
     {
         lock (gate)
         {
-            return pending.Count == 0 && retrying.Count == 0 && written >= submitted && dropped == 0;
+            return pending.Count == 0 && retrying.Count == 0 && moves.Count == 0 && written >= submitted && dropped == 0;
         }
     }
 
@@ -126,7 +217,7 @@ internal sealed partial class FileWriter
     {
         lock (gate)
         {
-            if (pending.Count > 0 || retrying.Count > 0)
+            if (pending.Count > 0 || retrying.Count > 0 || moves.Count > 0)
             {
                 force = true; // with nothing pending the flag would outlive its write and defeat the quiet time of the next change
             }
@@ -144,7 +235,7 @@ internal sealed partial class FileWriter
         {
             long target = submitted;
             failed = 0; // a failure before this call is tried again
-            if (pending.Count > 0 || retrying.Count > 0)
+            if (pending.Count > 0 || retrying.Count > 0 || moves.Count > 0)
             {
                 force = true;
             }
@@ -174,6 +265,7 @@ internal sealed partial class FileWriter
         {
             pending.Clear();
             retrying.Clear();
+            moves.Clear();
             written = submitted;
             force = false;
             generation++;
@@ -211,6 +303,7 @@ internal sealed partial class FileWriter
         for (; ; )
         {
             var batch = new Dictionary<string, byte[]>();
+            var dueMoves = new List<Move>();
             var passesBefore = new Dictionary<string, int>();
             long batchNumber;
             long batchGeneration;
@@ -224,7 +317,7 @@ internal sealed partial class FileWriter
                     {
                         return;
                     }
-                    if (pending.Count == 0 && retrying.Count == 0)
+                    if (pending.Count == 0 && retrying.Count == 0 && moves.Count == 0)
                     {
                         Monitor.Wait(gate);
                         continue;
@@ -245,7 +338,28 @@ internal sealed partial class FileWriter
                             retryDue = Math.Min(retryDue, r.At);
                         }
                     }
-                    if (takeOrdinary || batch.Count > 0)
+                    // a move waits for every older move that shares a file with it (its source or destination may be that file's
+                    // content): written out of turn, a later move could put the item in its destination while an older one still
+                    // has it in its source file
+                    var held = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (Move m in moves)
+                    {
+                        bool blocked = held.Contains(m.Source) || held.Contains(m.Destination);
+                        if (!blocked && (force || now >= m.At))
+                        {
+                            dueMoves.Add(m);
+                        }
+                        else
+                        {
+                            held.Add(m.Source);
+                            held.Add(m.Destination);
+                            if (!blocked)
+                            {
+                                retryDue = Math.Min(retryDue, m.At);
+                            }
+                        }
+                    }
+                    if (takeOrdinary || batch.Count > 0 || dueMoves.Count > 0)
                     {
                         break;
                     }
@@ -265,7 +379,11 @@ internal sealed partial class FileWriter
                     }
                     pending = new Dictionary<string, byte[]>();
                 }
-                seriesOpen = retrying.Count > 0;
+                foreach (Move m in dueMoves)
+                {
+                    moves.Remove(m);
+                }
+                seriesOpen = retrying.Count > 0 || moves.Count > 0;
                 batchNumber = submitted;
                 batchGeneration = generation;
                 force = false;
@@ -274,11 +392,76 @@ internal sealed partial class FileWriter
             long started = Stopwatch.GetTimestamp();
             var notWritten = new Dictionary<string, byte[]>();
             var given = new List<string>();
+            var requeue = new List<Move>();                       // moves that failed or were held back, in their order
+            var heldBack = new HashSet<Move>();                   // the ones of them that were not even tried
+            var stuck = new HashSet<string>(StringComparer.Ordinal); // files of the moves that failed in this pass
+            int writtenFiles = 0;
+            foreach (Move move in dueMoves)
+            {
+                if (stuck.Contains(move.Source) || stuck.Contains(move.Destination))
+                {
+                    requeue.Add(move); // an older move of one of its files failed: it waits for it
+                    heldBack.Add(move);
+                    continue;
+                }
+                try
+                {
+                    WriteAtomically(move.Source, move.SourceContent, batchGeneration);
+                    writtenFiles++;
+                }
+                catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                    counters.CountWriteFailure();
+                    log(0, "the file " + move.Source + " cannot be written and is given up (its move is given up with it): " + e.Message);
+                    given.Add(move.Source);
+                    stuck.Add(move.Source);
+                    stuck.Add(move.Destination); // (a later move of these files is not written either: its content assumes this move)
+                    continue; // the destination is never written before the source
+                }
+                catch (Exception e)
+                {
+                    counters.CountWriteFailure();
+                    if (!seriesOpen && move.Passes == 0)
+                    {
+                        seriesOpen = true;
+                        log(0, "the file " + move.Source + " could not be written (its move is tried again, later and later): " + e.Message);
+                    }
+                    requeue.Add(move);
+                    stuck.Add(move.Source);
+                    stuck.Add(move.Destination);
+                    continue;
+                }
+                try
+                {
+                    options.BetweenMove?.Invoke(move.Source, move.Destination);
+                    WriteAtomically(move.Destination, move.DestinationContent, batchGeneration);
+                    writtenFiles++;
+                }
+                catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                    counters.CountWriteFailure();
+                    log(0, "the file " + move.Destination + " cannot be written and is given up: " + e.Message);
+                    given.Add(move.Destination);
+                }
+                catch (Exception e)
+                {
+                    // the source is on disk: only the destination is tried again, as any file (its own back-off)
+                    counters.CountWriteFailure();
+                    if (!seriesOpen)
+                    {
+                        seriesOpen = true;
+                        log(0, "the file " + move.Destination + " could not be written (it is tried again, later and later): " + e.Message);
+                    }
+                    notWritten[move.Destination] = move.DestinationContent;
+                    passesBefore[move.Destination] = 0;
+                }
+            }
             foreach ((string path, byte[] content) in batch)
             {
                 try
                 {
                     WriteAtomically(path, content, batchGeneration);
+                    writtenFiles++;
                 }
                 catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
                 {
@@ -297,7 +480,7 @@ internal sealed partial class FileWriter
                     notWritten[path] = content;
                 }
             }
-            counters.CountWrite(batch.Count - notWritten.Count - given.Count, Stopwatch.GetTimestamp() - started);
+            counters.CountWrite(writtenFiles, Stopwatch.GetTimestamp() - started);
 
             lock (gate)
             {
@@ -308,6 +491,32 @@ internal sealed partial class FileWriter
                         dropped = Math.Max(dropped, batchNumber);
                     }
                     var gaveUp = new List<string>();
+                    int back = 0; // where the move goes back in the queue: in front of the moves that came after it
+                    foreach (Move move in requeue)
+                    {
+                        if (!heldBack.Contains(move))
+                        {
+                            move.Passes++;
+                            if (move.Passes >= options.MaxFailedPasses)
+                            {
+                                gaveUp.Add(move.Source); // given up; newer submissions of its files were never tried and are still written
+                                continue;
+                            }
+                            double seconds = Math.Min(options.MaxRetryDelay.TotalSeconds, options.Quiet.TotalSeconds * Math.Pow(2, move.Passes - 1));
+                            move.At = Stopwatch.GetTimestamp() + (long)(seconds * Stopwatch.Frequency);
+                            failed = Math.Max(failed, batchNumber);
+                        }
+                        // a newer submission that came while the move was written replaces its content (the move keeps its place)
+                        if (pending.Remove(move.Source, out byte[]? newerSource))
+                        {
+                            move.SourceContent = newerSource;
+                        }
+                        if (pending.Remove(move.Destination, out byte[]? newerDestination))
+                        {
+                            move.DestinationContent = newerDestination;
+                        }
+                        moves.Insert(back++, move);
+                    }
                     foreach ((string path, byte[] content) in notWritten)
                     {
                         int passes = passesBefore[path] + 1;
@@ -331,7 +540,7 @@ internal sealed partial class FileWriter
                         dropped = Math.Max(dropped, batchNumber);
                         failed = Math.Max(failed, batchNumber);
                     }
-                    if (pending.Count == 0 && retrying.Count == 0)
+                    if (pending.Count == 0 && retrying.Count == 0 && moves.Count == 0)
                     {
                         written = Math.Max(written, submitted); // nothing is outstanding: everything is on disk or given up
                     }

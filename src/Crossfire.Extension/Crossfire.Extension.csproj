@@ -13,11 +13,18 @@
   <ItemGroup>
     <ProjectReference Include="..\Crossfire\Crossfire.csproj" />
     <InternalsVisibleTo Include="Crossfire.Extension.Tests" />
+    <InternalsVisibleTo Include="Crossfire.WriterChild" />
   </ItemGroup>
 
   <!-- the output folder is an extension folder (docs/protocol.md section 1): the executable and extension.json side by side -->
   <ItemGroup>
     <None Include="extension.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Crossfire's lib/treasures and lib/skill_params at 8b7ee7f90, unchanged (docs/extension.md, "The start path"): the data the ported code reads -->
+  <ItemGroup>
+    <EmbeddedResource Include="Data\treasures" LogicalName="treasures" />
+    <EmbeddedResource Include="Data\skill_params" LogicalName="skill_params" />
   </ItemGroup>
 
 </Project>

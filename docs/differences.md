@@ -55,6 +55,17 @@ Graal Kingdoms' `mudlevels` files are Crossfire's map format with these differen
 - **Merging.** `insert_ob_in_ob` merges what can merge (`CAN_MERGE`): two identical nested objects of a seed become one with a larger
   `nrof`, as in C.
 
+## Gmaps (the extension, not the port)
+
+The rules of protocol 1.1 section 7.1 are the extension's own (docs/extension.md, "Gmaps"). Where the protocol leaves a choice, Alpaxis chose:
+
+- **The level an `npc.pos` row or a `player.pos` answer names, for a script on a gmap with a layout.** The position is translated into the
+  gmap's tiles, and the level is the gmap's name, so that the level and the position a script reads belong together (a script on a gmap
+  counts every position in the gmap's tiles). The protocol says only that the position is translated.
+- **A refused `gmap.layout` forgets the gmap's earlier layout** (the text says the extension "keeps no layout of that gmap").
+- **Names are level keys**: a segment's name and the gmap's own name are folded to lower case, and every level name the extension sends
+  is in that form.
+
 ## Language and runtime
 
 - **Strings.** The C code shares strings through `common/shstr.c` (`add_string`, `free_string`, `add_refcount`) and compares them by
@@ -129,13 +140,49 @@ Graal Kingdoms' `mudlevels` files are Crossfire's map format with these differen
   message. The port has no pictures: `FaceTable.AutoRegister` (the default) gives a name a number the first time it is seen, so no face name
   of an archetype is lost; with it off `FindFace` returns its `error` argument as C does. Number 0 is `bug.111`, 1 `blank.111` (the face of a
   cleared object), 2 `empty.111`.
-- **Treasure lists.** The lists belong to `common/treasure.c` (the treasure phase). Until then `CrossfireHost.FindTreasureList` makes a
-  `TreasureList` for any name, so that the `randomitems` of an archetype keeps its name; the cases of C stay: `randomitems none` is no list
-  (and the second pass logs "Failed to link treasure to arch", 48 times in Graal Kingdoms' folder) and nothing is set while the first pass
-  runs. A host that knows the lists returns null for the others and gets C's "Couldn't find treasurelist" message.
+- **Treasure lists.** `CfWorld.TreasureText` (the text of the treasures file; the extension supplies it) is read by `load_treasures`
+  between the two archetype passes; the lists then answer `find_treasurelist` and a name that is not one gets C's "Couldn't find
+  treasurelist" message. Without a text `CrossfireHost.FindTreasureList` makes a `TreasureList` for any name, so that the `randomitems` of
+  an archetype keeps its name; the cases of C stay: `randomitems none` is no list (and the second pass logs "Failed to link treasure to
+  arch", 48 times in Graal Kingdoms' folder) and nothing is set while the first pass runs.
+- **`fix_generated_item` is partly ported.** Of the function only the `GT_STARTEQUIP` branch and `fix_flesh_item` are: random magic
+  (`set_magic`, so the `magic` of a list element is not used for a bonus), the artifacts (`generate_artifact` and the 1 in 20 roll for one,
+  which also takes a `RANDOM()` that is not taken here) and what the type switch gives rings, amulets, wands, rods, scrolls, books,
+  spellbooks, potions, runes, bracers and cursed weapons or armour are not (phase 4: they need the spell table, `readable.c` and
+  `artifact.c`). An item of those types comes out as its archetype is. The starting items of the six class lists are not touched by it
+  except the amulet and the books of the priest and the casters, which are as the archetypes have them.
+- **A treasure element without archetype or list**, or a list that does not exist, makes nothing: C reads the null pointer
+  (`t->item->clone`, `t->total_chance`) and crashes after logging the error.
 - **`ArchCollector`** is collect.pl's archetype half in C#: the archetype folder to the text of the two files. `anim ... mina` blocks become
   an `animation` line and an entry of the animations file; the colour lines (`color_fg`, `color_bg`, `visibility`, `magicmap`) are removed.
 - **`CrossfireHost`** (the host) and the marker interfaces `IPlayerHandle`, `IMapHandle`, `ISpellHandle`: see [porting.md](porting.md).
+
+## Items of a player in the extension (Graal Kingdoms; lane 4C of phase 3)
+
+These are choices of Alpaxis, not of Crossfire, and they are in the extension (`Gk/ItemStrings.cs`, `Dispatcher.Items.cs`).
+
+- **The item string has the weight of the whole stack.** `esrv_send_item` sends the weight of one piece and lets Crossfire's client multiply;
+  Graal Kingdoms' Item-Menu prints the field as it is (mud-phase3.md section 5, fact 3a). The field is `nrof * weight + carrying` (an
+  object with `nrof` 0 counts once).
+- **`F_NOPICK` for sends and updates alike.** C ORs it into the flag word only in `esrv_send_inventory`, and sends the weight -1 for such
+  an object. The string has the flag word with the bit for every object with `FLAG_NO_PICK`, and the real weight.
+- **Types 162, 163 are drawn as wielded, 164 to 166 as worn.** `query_flags` gives every type of Graal Kingdoms' own (160 to 166) the
+  state "applied", which its Item-Menu does not draw on the paper doll (fact 3b). 160 and 161 stay "applied" (they cannot be applied).
+- **`mud_weight` is the whole weight the player carries** (his own weight and `carrying`), and `mud_weight_lim` is `weight_limit[Str]`;
+  both are written by the flush, in the extension only. Wave 3 wrote `ob->weight` as `mud_weight`, which is a constant of the body.
+- **The seven fields, and only the top level and the open container have a string**; the field 6 is 1 inside the open container, 0
+  elsewhere. `mud_container` is `<id>,<name>,<picture>` of the open container, and the empty text after it is closed. An invisible object
+  (a skill or a force) has no string and is not in `muditems`: it is not an item for a script, as it is not one for the client.
+- **`esrv_update_item` writes the whole string** whatever its flags say: the text is compared with what the client holds, so only a change is
+  sent.
+- **Items made by a script are identified** (`FLAG_IDENTIFIED` at creation): the original network's rule is not known; the shops of
+  Graal Kingdoms price and name an item as identified (mud-phase3.md section 3, fact 4).
+- **The carried weight is fixed at login.** A file holds no sum and C calls `fix_weight` from its tick, which the extension does not
+  have: `Dispatcher.FixWeight` is called for the player at `player.login`.
+- **`DrawInfo` is an event.** On a 1.1 link `new_draw_info` is the player event `onRPGMessage(text)` with the `client.text` effect as its
+  fallback; on a 1.0 link the effect alone.
+- **`mudowner` is not `ob->owner`.** It is an extra line of the object (the account text) or, for an NPC owner, kept in memory; the
+  port's saver skips objects that have an `owner`, which would lose every item a player dropped.
 
 ## Behaviour of C that the port keeps (so that nobody fixes it)
 
@@ -161,3 +208,26 @@ Graal Kingdoms' `mudlevels` files are Crossfire's map format with these differen
   keyword (`EVENT_STOP`, `EVENT_CLOCK`...) it writes the previous event line again.
 - `set_owner` loops for ever when two objects own each other and their counts match; only a freed and reused object (counts differ)
   ends it. C's comment says so; the port does not add a guard.
+- `item_matched_string` returns 6 for a count above 1 when the plural name is **not** equal to the text (C tests the result of
+  `strcasecmp` as a truth value), and sets the player's `count` there; a text that is the plural name falls through to the other matches.
+
+## The start path (`Crossfire.Extension/Gk`)
+
+- **`fix_player` is partly ported** (`FixPlayer.Fix`): the stats, the three life values and the weight limit. A player whose stats were
+  never rolled (an account of this extension from before the start path) is left as its file has it: C always has `orig_stats` and
+  the level arrays, the extension has them only after `roll_stats` (kept as the lines `mudorigstats`, `mudlevhp`, `mudlevsp` and
+  `mudlevgrace` of the account file).
+- **`give_initial_items` takes the list as an argument** and tests that: C tests `pl->randomitems` and uses `items`; here the player
+  archetype has no `randomitems` and the class does.
+- **`init_player_exp`**: for a player that has some of the experience objects but not all, C's loop reads past its array and adds copies
+  without end; the port adds each missing object once. For more objects than categories it logs and adds none.
+- **`link_player_skills`** gives up with an error when the player still has the wrong number of experience objects after
+  `init_player_exp` (C calls itself again without end for more objects than categories). A skill number outside the table is a skill
+  with no category (C reads past the table).
+- **`init_exp_obj`**: C exits when the world has no experience archetype or more than seven; the port logs the error and goes on
+  with none, or with the first seven.
+- **`player_lvl_adj`** has no dragon part and no messages; `add_exp` has the 0-experience branch only.
+- **`setmudclass`, `mudresetplayer` and the account methods** are Alpaxis's own: GK's original is not available (docs/mud-phase3.md
+  section 4.7 gives its source). Alpaxis's choices: `mudclass` is the class name without `_class`; choosing a class again takes the
+  first choice's items out; `mudresetplayer` clears `mudclass`; `loadmudaccount` with a suffix fails when the file is missing;
+  `backupmudaccount` writes `backups/<file>.<UTC time>.txt`; the methods answer a bool where a script might test them.

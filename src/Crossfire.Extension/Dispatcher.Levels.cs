@@ -279,19 +279,57 @@ internal sealed partial class Dispatcher
     /// <summary>Writes the level's file (through the writer) and clears its dirty flag.</summary>
     private void SubmitLevel(Level level)
     {
+        (string, byte[])? file = LevelFile(level);
+        if (file != null)
+        {
+            PutFile(file.Value.Item1, file.Value.Item2);
+        }
+    }
+
+    /// <summary>The file of a level (its path under the data folder and its content), and its dirty flag cleared; null when it has no usable file name.</summary>
+    private (string, byte[])? LevelFile(Level level)
+    {
         string? rel = FileNames.LevelFile(level.Name);
         if (rel == null || refused.Contains("level:" + level.Name))
         {
             log(1, "level " + level.Name + " has no usable file name and is not saved");
             level.Dirty = false;
+            return null;
+        }
+        byte[] content = FileText.ToBytes(LevelFiles.Write(world!, level));
+        level.Dirty = false;
+        return (rel, content);
+    }
+
+    /// <summary>
+    /// A move of an object across a level file and an account file, or two account files (pick up, drop, trade, shop buy: the write
+    /// order across files of docs/extension.md "Moves across files"): hands the writer both files and has the SOURCE file written first
+    /// and the DESTINATION second, in one pass and at once. Called by the operation that moved the object after it changed both sides;
+    /// both dirty flags are cleared. A side that has no file (no usable name) is submitted alone, as an ordinary file.
+    /// </summary>
+    internal void SubmitMove(Level? sourceLevel, PlayerState? sourcePlayer, Level? destinationLevel, PlayerState? destinationPlayer)
+    {
+        (string, byte[])? source = sourceLevel != null ? LevelFile(sourceLevel) : sourcePlayer != null ? AccountFile(sourcePlayer) : null;
+        (string, byte[])? destination = destinationLevel != null ? LevelFile(destinationLevel) : destinationPlayer != null ? AccountFile(destinationPlayer) : null;
+        if (source != null && destination != null && source.Value.Item1 != destination.Value.Item1)
+        {
+            recent[source.Value.Item1] = source.Value.Item2;
+            recent[destination.Value.Item1] = destination.Value.Item2;
+            writer!.SubmitMove(source.Value.Item1, source.Value.Item2, destination.Value.Item1, destination.Value.Item2);
             return;
         }
-        PutFile(rel, FileText.ToBytes(LevelFiles.Write(world!, level)));
-        level.Dirty = false;
+        foreach ((string, byte[])? file in new[] { source, destination })
+        {
+            if (file != null)
+            {
+                PutFile(file.Value.Item1, file.Value.Item2);
+            }
+        }
     }
 
     private void FreeCfObject(CfObject ob)
     {
+        ReleaseItemTags(ob);
         ob.SetFlag(Define.FLAG_REMOVED);
         world!.FreeObject(ob);
     }
@@ -310,7 +348,12 @@ internal sealed partial class Dispatcher
     /// <summary>The effect of a write on a target: the event of a level object (objects.md 3.2) or the client string of a player.</summary>
     private void AfterSet(object target, Bound member, Val stored, bool changed)
     {
-        if (target is LevelObject lo)
+        if (target is LevelObject { Level: var home } item && home == Level.Inventory)
+        {
+            // an object in an inventory has no NPC and no event: its string and the player's file change (lane 4C)
+            AfterItemSet(item, changed);
+        }
+        else if (target is LevelObject lo)
         {
             if (!changed)
             {
@@ -330,6 +373,7 @@ internal sealed partial class Dispatcher
             {
                 SetClientString(ps, name, Text(stored));
             }
+            ps.Contr?.Touch(); // the flush of lane 4C writes the weight and its limit, which a stat (the strength) changes
         }
     }
 
@@ -407,23 +451,44 @@ internal sealed partial class Dispatcher
 
     // ------------------------------------------------------------------ making objects
 
-    /// <summary>The level of the running request (the script's level), or null with a log line.</summary>
-    private Level? RequestLevel(string function)
+    /// <summary>
+    /// The level that holds a place of the running request, or null with a log line. The script's level is <c>ctx.level</c>; when it is
+    /// a gmap that has a layout (protocol section 7.1) the level is the segment that holds (<paramref name="x"/>, <paramref name="y"/>)
+    /// and the position becomes the position in that segment; a position in no segment gives null and nothing is made.
+    /// </summary>
+    private Level? RequestLevel(string function, ref double x, ref double y, Val rawX, Val rawY)
     {
         if (string.IsNullOrEmpty(ctxLevel))
         {
             log(1, function + ": the call has no level");
             return null;
         }
-        Level? level = GetOrReadLevel(ctxLevel);
+        // the position as the call gave it: a NaN or an infinity is no position of a gmap (a level's script reads it as 0, as AsNumber does)
+        if (ResolvePlace(ctxLevel, RawNumber(rawX) ?? x, RawNumber(rawY) ?? y) is not { } place)
+        {
+            log(1, function + ": the position is in no segment of the gmap " + ctxLevel);
+            return null;
+        }
+        if (place.Gmap != null)
+        {
+            x = place.X;
+            y = place.Y;
+        }
+        return LevelForPlacing(function, place.Level);
+    }
+
+    /// <summary>The level of that key for an object to be placed in it: the one held or read, else a new one; null with a log line when it cannot be used.</summary>
+    private Level? LevelForPlacing(string function, string key)
+    {
+        Level? level = GetOrReadLevel(key);
         if (level == null)
         {
-            if (refused.Contains("level:" + ctxLevel) || FileNames.LevelFile(ctxLevel) == null)
+            if (refused.Contains("level:" + key) || FileNames.LevelFile(key) == null)
             {
-                log(1, function + ": level " + ctxLevel + " cannot be used");
+                log(1, function + ": level " + key + " cannot be used");
                 return null;
             }
-            level = NewLevel(ctxLevel);
+            level = NewLevel(key);
         }
         return level;
     }
@@ -450,7 +515,7 @@ internal sealed partial class Dispatcher
             log(1, function + ": level " + level.Name + " holds " + level.Objects.Count + " objects, the most it may");
             return null;
         }
-        CfObject ob = world.ArchToObject(at)!;
+        CfObject ob = NewItem(at);
         return Attach(level, ob, x, y);
     }
 
@@ -487,7 +552,7 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "mudaddobject takes x, y and an archetype name");
         }
-        Level? level = RequestLevel("mudaddobject");
+        Level? level = RequestLevel("mudaddobject", ref x, ref y, args[0], args[1]);
         if (level == null)
         {
             return Outcome.Ok(Val.Nil);
@@ -507,7 +572,7 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "mudaddspecialobject takes x, y, a value, \"<archetype> <rest>\" and a message");
         }
-        Level? level = RequestLevel("mudaddspecialobject");
+        Level? level = RequestLevel("mudaddspecialobject", ref x, ref y, args[0], args[1]);
         if (level == null)
         {
             return Outcome.Ok(Val.Nil);
@@ -549,9 +614,19 @@ internal sealed partial class Dispatcher
                 {
                     return Outcome.Fail(Status.BadArgs, "cloneMudObject takes x and y");
                 }
-                if (lo.Level.Objects.Count >= options.Gk.MaxObjectsPerLevel)
+                // a script on a gmap with a layout places the clone in the segment of its position (protocol section 7.1); else it stays in the object's level
+                Level target = lo.Level;
+                if (!string.IsNullOrEmpty(ctxLevel) && GmapOf(ctxLevel) != null)
                 {
-                    log(1, "cloneMudObject: level " + lo.Level.Name + " holds " + lo.Level.Objects.Count + " objects, the most it may");
+                    if (RequestLevel("cloneMudObject", ref x, ref y, args[0], args[1]) is not { } segment)
+                    {
+                        return Outcome.Ok(Val.Nil);
+                    }
+                    target = segment;
+                }
+                if (target.Objects.Count >= options.Gk.MaxObjectsPerLevel)
+                {
+                    log(1, "cloneMudObject: level " + target.Name + " holds " + target.Objects.Count + " objects, the most it may");
                     return Outcome.Ok(Val.Nil);
                 }
                 // the mud state is copied (fields, the extra lines, the inventory); the script's variables and the host's state are not
@@ -560,7 +635,7 @@ internal sealed partial class Dispatcher
                 {
                     return Outcome.Fail(Status.Internal, "the object cannot be cloned");
                 }
-                LevelObject clone = Attach(lo.Level, copy, x, y);
+                LevelObject clone = Attach(target, copy, x, y);
                 return Outcome.Ok(Place(clone));
             }
             case TMudObjectMembers.MethodDestroyMudObject:
