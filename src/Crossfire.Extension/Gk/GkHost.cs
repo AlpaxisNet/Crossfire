@@ -42,7 +42,7 @@ internal sealed class GkHost : CrossfireHost
     /// <summary>The string is written whole for every kind of update: the flags of the update say nothing the text does not.</summary>
     public override void EsrvUpdateItem(int flags, CfObject player, CfObject op) => Items?.ItemSent(player, op);
 
-    public override void EsrvDelItem(IPlayerHandle? player, uint tag) => Items?.ItemDeleted(player, tag);
+    public override void EsrvDelItem(IPlayerHandle? player, uint tag) => Items?.ItemDeleted(player);
 
     public override void FixPlayer(CfObject player) => Items?.PlayerFixed(player);
 

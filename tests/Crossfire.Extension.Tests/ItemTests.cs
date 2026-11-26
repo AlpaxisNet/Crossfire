@@ -105,6 +105,15 @@ internal static class ItemWorld
                 return Outcome.Ok(Val.Nil);
             case "mark":
                 return Outcome.Ok(Val.Int(ItemMatching.CommandMark(w, pl, a[2].IsNil ? null : a[2].AsString)));
+            case "quiet": // a removal that C's fix_player is not told of (FLAG_NO_FIX_PLAYER), and only esrv_del_item tells the client
+            {
+                CfObject item = Item(a[2])!;
+                pl.SetFlag(Define.FLAG_NO_FIX_PLAYER);
+                w.RemoveOb(item);
+                pl.ClearFlag(Define.FLAG_NO_FIX_PLAYER);
+                w.Host.EsrvDelItem(pl.Contr, item.Count);
+                return Outcome.Ok(Val.Nil);
+            }
             case "keep": // the lane of pick up and drop gives the proxy a level: the tag stays when the object leaves the tree
             {
                 CfObject item = Item(a[2])!;
@@ -127,7 +136,6 @@ internal static class ItemWorld
                 CfObject rat = w.ArchToObject(w.FindArchetype("rat"))!;
                 w.Host.EsrvSendItem(rat, hidden);
                 w.Host.EsrvDelItem(rat.Contr, hidden.Count);
-                w.Host.EsrvDelItem(pl.Contr, 999999); // a count of no item
                 return Outcome.Ok(Val.Int(p.Shown.Dirty.Count));
             }
             case "wield": // what apply_special will do: the player's current weapon
@@ -737,6 +745,36 @@ public sealed class ItemTests
     }
 
     [Fact]
+    public void Tags_Given_a_removal_that_only_esrv_del_item_tells_of_When_the_request_ends_Then_the_string_is_deleted_and_the_tag_is_dead()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob));
+        ulong bob = Login(ext, "bob").Result.AsHandle;
+        var items = Items(ext, bob);
+
+        // Act
+        ReplyFrame r = Do(ext, "quiet", "bob", Val.Int((uint)items[0].Handle));
+
+        // Assert
+        Assert.Equal(new[] { ItemKey(items[0].Handle) }, Effects(r, "client.del").Select(e => e.Get("name")!.AsString));
+        Assert.Equal((ulong)Status.BadHandle, ext.Call(9, new[] { H(items[0].Handle), Val.Int(Obj("mudrealname")) }).Status);
+    }
+
+    [Fact]
+    public void PlayerLogin_Given_an_invisible_object_in_the_pack_When_logged_in_Then_it_has_a_tag_and_no_string()
+    {
+        // Arrange
+        using DirectExt ext = Start(WorldWith("bob", Bob + "arch sword\ninvisible 1\nend\n"));
+
+        // Act
+        ReplyFrame r = Login(ext, "bob");
+
+        // Assert
+        Assert.Equal(4, ext.Dispatcher.LiveItemTags);
+        Assert.Equal(3, Strings(r).Keys.Count(k => k.StartsWith("clientr.mud_item", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void Item_Given_a_write_that_changes_nothing_When_the_request_ends_Then_no_string_and_the_account_stays_clean()
     {
         // Arrange
@@ -1002,10 +1040,13 @@ public sealed class ItemTests
         ReplyFrame number = Set(ext, bob, member, Val.Int(3));
 
         // Assert
+        Assert.Equal(ValKind.String, empty.Result.Kind);
         Assert.Equal("", empty.Result.AsString);
+        Assert.Equal(ValKind.String, nil.Result.Kind);
         Assert.Equal("", nil.Result.AsString);
         Assert.Equal((ulong)Status.BadArgs, text.Status);
         Assert.Equal((ulong)Status.BadArgs, number.Status);
+        Assert.Equal(ValKind.String, read.Result.Kind);
         Assert.Equal("", read.Result.AsString); // as in C: the mark is not cleared by a read that does not find the object
     }
 
@@ -1024,8 +1065,13 @@ public sealed class ItemTests
         ReplyFrame self = Set(ext, bob, member, H(bob));
 
         // Assert
+        Assert.Equal(ValKind.String, nested.Result.Kind);
         Assert.Equal("", nested.Result.AsString);
+        Assert.Equal(ValKind.String, self.Result.Kind);
         Assert.Equal("", self.Result.AsString);
+        Do(ext, "open", "bob", Val.Int((uint)items[2].Handle));
+        ReplyFrame inOpen = Set(ext, bob, member, H(inside[0].Handle)); // in the open container: shown, but C's mark looks at the top level only
+        Assert.Equal(ValKind.String, inOpen.Result.Kind);
     }
 
     [Fact]
@@ -1130,7 +1176,9 @@ public sealed class ItemTests
         // Act / Assert
         Assert.Equal(5 * 10 + 7 + 2 * 10, Get(ext, bob, Ply("mudmoney")).AsInt);
         Assert.Equal(20, Get(ext, items[2].Handle, Obj("mudmoney")).AsInt);
+        int errors = ext.Dispatcher.WorldOrNull!.LogCounts[(int)LogLevel.Error];
         Assert.Equal(0, Get(ext, items[3].Handle, Obj("mudmoney")).AsInt);
+        Assert.Equal(errors, ext.Dispatcher.WorldOrNull!.LogCounts[(int)LogLevel.Error]); // query_money is not called for an object that is no player or container
     }
 
     [Fact]
@@ -1193,6 +1241,7 @@ public sealed class ItemTests
 
         // Assert
         Assert.Equal("zed\\x", Get(ext, banana2, Obj("mudowner")).AsString);
+        Assert.DoesNotContain(ext.Logs, l => l.Text.StartsWith("the file of account")); // the loader knows the key: no line of an error in the file
     }
 
     [Fact]

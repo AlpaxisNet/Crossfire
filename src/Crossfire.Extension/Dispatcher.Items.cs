@@ -16,22 +16,18 @@ internal sealed partial class Dispatcher
     /// <summary>The most item strings one player has at a time (protocol 4.2: a request's effects are at most 4,096); the rest are not shown.</summary>
     public const int MaxShownItems = 3800;
 
-    /// <summary>What the extension knows of an object that has a tag as an item: the proxy object (its key in the handle table) and the C tag it had.</summary>
+    /// <summary>What the extension knows of an object that has a tag as an item: the proxy object (its key in the handle table).</summary>
     private sealed class ItemEntry
     {
-        public ItemEntry(LevelObject wrapper, uint count)
+        public ItemEntry(LevelObject wrapper)
         {
             Wrapper = wrapper;
-            Count = count;
         }
 
         public LevelObject Wrapper { get; }
-
-        public uint Count { get; }
     }
 
     private readonly Dictionary<CfObject, ItemEntry> itemEntries = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<uint, ItemEntry> itemsByCount = new();
     private readonly ConditionalWeakTable<CfObject, object> itemOwners = new();
     private readonly HashSet<CfObject> looseItems = new(ReferenceEqualityComparer.Instance);
     private bool shownCapLogged;
@@ -55,9 +51,8 @@ internal sealed partial class Dispatcher
         if (!itemEntries.TryGetValue(ob, out ItemEntry? entry))
         {
             var proxy = new LevelObject(Level.Inventory, ob) { Placed = false };
-            entry = new ItemEntry(proxy, ob.Count);
+            entry = new ItemEntry(proxy);
             itemEntries[ob] = entry;
-            itemsByCount[ob.Count] = entry;
             if (HolderOf(ob) == null)
             {
                 looseItems.Add(ob); // in no player's tree (yet): the sweep of a flush sees it freed or arrived
@@ -70,9 +65,7 @@ internal sealed partial class Dispatcher
     /// <summary>Registers a level object's proxy as the proxy of its object too (it goes into an inventory with the tag it has).</summary>
     internal void AdoptLevelObject(LevelObject lo)
     {
-        var entry = new ItemEntry(lo, lo.Ob.Count);
-        itemEntries[lo.Ob] = entry;
-        itemsByCount[lo.Ob.Count] = entry;
+        itemEntries[lo.Ob] = new ItemEntry(lo);
     }
 
     /// <summary>The player whose tree holds an object (inventory, nested sacks), or null.</summary>
@@ -117,7 +110,6 @@ internal sealed partial class Dispatcher
         looseItems.Remove(ob);
         if (itemEntries.Remove(ob, out ItemEntry? entry))
         {
-            itemsByCount.Remove(entry.Count);
             handles.Kill(entry.Wrapper);
             entry.Wrapper.Dead = true;
         }
@@ -204,19 +196,17 @@ internal sealed partial class Dispatcher
         p.Shown.MarkDirty(handles.TagOf(TagItem(p, op)));
     }
 
-    /// <summary><c>esrv_del_item</c>: the item with the C tag <paramref name="count"/> is gone from the player's window.</summary>
-    internal void ItemDeleted(IPlayerHandle? contr, uint count)
+    /// <summary>
+    /// <c>esrv_del_item</c>: an item is gone from the player's window. C names it by its count, which a freed object has lost; the
+    /// flush needs no name: it looks at the whole window, finds the string whose object is not in it any more and deletes it.
+    /// </summary>
+    internal void ItemDeleted(IPlayerHandle? contr)
     {
-        if (contr is not Player p)
+        if (contr is Player p)
         {
-            return;
+            p.Reconcile = true;
+            p.Touch();
         }
-        if (itemsByCount.TryGetValue(count, out ItemEntry? entry))
-        {
-            p.Shown.MarkRemoved(TagOfItem(entry));
-        }
-        p.Reconcile = true; // the tree changed: the flush looks at all of it, and the sweep frees the tags of what left
-        p.Touch();
     }
 
     /// <summary><c>fix_player</c>, as the object model calls it when an object enters or leaves a player's tree: the tree changed.</summary>
