@@ -677,6 +677,24 @@ public sealed class ApplyTests
         Assert.Equal(3L, g.Read(stack, "mudnrof").AsInt);
     }
 
+    [Fact]
+    public void ApplySpecial_Given_a_stack_of_swords_and_a_player_without_the_skill_When_wielded_Then_he_cannot_use_it_and_the_whole_stack_is_still_his()
+    {
+        // Arrange: no skill_melee_weapon in his inventory
+        using var g = new Game("arch sword\nnrof 3\nend\n", skills: "");
+        ulong stack = g.Item("sword");
+
+        // Act
+        ReplyFrame r = g.DefaultApply(stack);
+
+        // Assert
+        Assert.Contains("You can't use that!", Lines(r));
+        Assert.DoesNotContain(g.Items(), i => g.Applied(i.Handle));
+        Assert.Equal(3L, g.Items().Where(i => i.Name == "sword").Sum(i => g.Read(i.Handle, "mudnrof").AsInt)); // the part that was split off came back
+        Assert.Empty(EventNames(r)); // nothing was wielded: no hook
+        Assert.True(g.ReadPlayer("currentweapon").IsNil);
+    }
+
     [Theory]
     [InlineData(1, 5, true)]
     [InlineData(1, 6, false)]
