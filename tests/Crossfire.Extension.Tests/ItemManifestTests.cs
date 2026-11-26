@@ -25,7 +25,7 @@ public sealed class ItemManifestTests
         // Act
         b.AddType(Lane.Core, new TypeDef(5, "TCoreOne", TypeMap(5, "TCoreOne", 1000, "int")));
         b.AddType(Lane.Core, new TypeDef(6, "TCoreTwo", TypeMap(6, "TCoreTwo", 7999, "int")));
-        InvalidOperationException outside = Assert.Throws<InvalidOperationException>(() => b.AddType(Lane.Core, new TypeDef(7, "TCoreThree", TypeMap(7, "TCoreThree", 9999, "int"))));
+        InvalidOperationException outside = Assert.Throws<InvalidOperationException>(() => b.AddType(Lane.Core, new TypeDef(7, "TCoreThree", TypeMap(7, "TCoreThree", 99999, "int"))));
         InvalidOperationException other = Assert.Throws<InvalidOperationException>(() => b.AddType(Lane.Items, new TypeDef(10, "TLaneOwn", TypeMap(10, "TLaneOwn", 2000, "int"))));
 
         // Assert

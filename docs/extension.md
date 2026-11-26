@@ -730,7 +730,7 @@ HELLO always says `proto_minor` 1. The key `player_classes` is written only for 
 ### Lanes and id ranges
 
 The manifest is collected by `Manifest.Collect(linkMinor)`: `RegisterCore`, then one method per lane in the order of the table,
-each in a file of its own (`Gk/Manifest.Items.cs`, `Manifest.Start.cs`, `Manifest.Gmaps.cs`, `Manifest.Wave5A.cs` to `Wave5D.cs`; a
+each in a file of its own (`Gk/Manifest.Items.cs`, `Manifest.Start.cs`, `Manifest.Gmaps.cs`, `Manifest.Wave5A.cs` to `Wave7B.cs`; a
 lane edits its own file only). The method gets a `ManifestBuilder`: `AddFunction(lane, FunctionDef)`, `AddType(lane, TypeDef)`,
 `AddEvent(lane, EventDef)`, `AddPlayerClass(name)`. The builder throws `InvalidOperationException` (found by the first test run) for
 an id outside the lane's range, a duplicate id or name, a type name that is not one of the protocol's, a `ref` name without
@@ -747,6 +747,12 @@ across the whole manifest (members and methods together), as the protocol asks. 
 | 5B | 5000 to 5999 | 50 to 59 | 5000 to 5999 |
 | 5C | 6000 to 6999 | 60 to 69 | 6000 to 6999 |
 | 5D | 7000 to 7999 | 70 to 79 | 7000 to 7999 |
+| 6A | 8000 to 8999 | 80 to 89 | 8000 to 8999 |
+| 6B | 9000 to 9999 | 90 to 99 | 9000 to 9999 |
+| 6C | 10000 to 10999 | 100 to 109 | 10000 to 10999 |
+| 6D | 11000 to 11999 | 110 to 119 | 11000 to 11999 |
+| 7A | 12000 to 12999 | 120 to 129 | 12000 to 12999 |
+| 7B | 13000 to 13999 | 130 to 139 | 13000 to 13999 |
 
 The core uses functions 64 to 67, types 1 to 3, members and methods 100 to 545. A lane's 1,000 member ids are split: the first 500
 are for its members and methods of `TMudObject`, the next 250 for `TMudPlayer`, the last 250 for its own new types
@@ -768,12 +774,24 @@ lane's work in `BindMember` when it adds a new target class.
 
 ### Methods of the lanes
 
-A method a wave 5 lane declares (with `b.NextMethodId()` in its `Extend...` partial) is run by the same lane: `Dispatcher.Invoke`
-asks `InvokeLaneMethod` (`Dispatcher.Lanes.cs`) first for a level object or an item's proxy, after the start path's methods for a
-player, and for any other target (an archetype) before it answers `unknown method`. `InvokeLaneMethod` asks the partial methods
-`InvokeWave5A` to `InvokeWave5D` in that order, each implemented in the lane's own `Dispatcher.Wave5A.cs` to `Dispatcher.Wave5D.cs`,
-and the first answer that is not null is the call's. A lane answers null for a method id that is not in its range, so the order
-decides nothing; a lane checks its own arguments, and a method that changes items or money calls `CheckBusy()` first.
+A method a lane of waves 5 to 7 declares (with `b.NextMethodId()` in its `Extend...` partial) is run by the same lane:
+`Dispatcher.Invoke` asks `InvokeLaneMethod` (`Dispatcher.Lanes.cs`) first for a level object or an item's proxy, after the start
+path's methods for a player, and for any other target (an archetype) before it answers `unknown method`. `InvokeLaneMethod` asks the
+partial methods `InvokeWave5A` to `InvokeWave5D`, then `InvokeWave6A` to `6D`, `7A` and `7B`, each implemented in the lane's own
+`Dispatcher.Wave5A.cs` and so on, and the first answer that is not null is the call's. A lane answers null for a method id that is not
+in its range, so the order decides nothing; a lane checks its own arguments, and a method that changes items or money calls
+`CheckBusy()` first.
+
+**Setup of the lanes.** After `session.init` has loaded the archetypes and the skill table, `Dispatcher.InitLanes` calls the partial
+methods `InitWave6A` to `InitWave7B`, each in the lane's own `Dispatcher.Wave<L>.cs` and absent until the lane needs one: that is
+where a lane sets the hooks earlier lanes left for it (`Dispatcher.ApplySpecialUnapply` and `PutObjectInSack` of lane 5A,
+`gk.Skills.ApplySpecial` of lane 5D).
+
+**Apply by lane.** C's `manual_apply` is one switch over the object's type. Lane 6B owns it; the types of lanes 6A (containers and
+keys), 6C (food, drink, flesh, potions, poison) and 6D (signs, books, lighters, treasures and the reading of types 161 to 166) are
+applied in those lanes' own files: 6B's switch first asks `Dispatcher.ApplyByLane(op, tmp, aflag)`, which asks the partial methods
+`ApplyWave6A`, `ApplyWave6C` and `ApplyWave6D` (each `null` for a type that is not the lane's) and gives what `manual_apply` returns
+for the type (0, 1 or 2, as in C), or null when no lane owns it, so that 6B's own cases go on.
 
 ### The player controller
 

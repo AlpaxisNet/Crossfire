@@ -108,6 +108,18 @@ internal static partial class TMudObjectMembers
         ExtendWave5C(b, methods);
         Begin(b, Lane.Wave5D);
         ExtendWave5D(b, methods);
+        Begin(b, Lane.Wave6A);
+        ExtendWave6A(b, methods);
+        Begin(b, Lane.Wave6B);
+        ExtendWave6B(b, methods);
+        Begin(b, Lane.Wave6C);
+        ExtendWave6C(b, methods);
+        Begin(b, Lane.Wave6D);
+        ExtendWave6D(b, methods);
+        Begin(b, Lane.Wave7A);
+        ExtendWave7A(b, methods);
+        Begin(b, Lane.Wave7B);
+        ExtendWave7B(b, methods);
         return new MemberTable<LevelObject>(TypeId, TypeName, "npc", b.Members, methods);
     }
 
@@ -128,6 +140,18 @@ internal static partial class TMudObjectMembers
     static partial void ExtendWave5C(FieldBuilder<LevelObject> b, List<MethodDef> methods);
 
     static partial void ExtendWave5D(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6A(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6B(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6C(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6D(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave7A(FieldBuilder<LevelObject> b, List<MethodDef> methods);
+
+    static partial void ExtendWave7B(FieldBuilder<LevelObject> b, List<MethodDef> methods);
 }
 
 /// <summary>The type TMudPlayer: host <c>player</c>, so its members are on the player's object of the host (protocol 6.2).</summary>
@@ -168,6 +192,18 @@ internal static partial class TMudPlayerMembers
         ExtendWave5C(b, methods);
         Begin(b, Lane.Wave5D);
         ExtendWave5D(b, methods);
+        Begin(b, Lane.Wave6A);
+        ExtendWave6A(b, methods);
+        Begin(b, Lane.Wave6B);
+        ExtendWave6B(b, methods);
+        Begin(b, Lane.Wave6C);
+        ExtendWave6C(b, methods);
+        Begin(b, Lane.Wave6D);
+        ExtendWave6D(b, methods);
+        Begin(b, Lane.Wave7A);
+        ExtendWave7A(b, methods);
+        Begin(b, Lane.Wave7B);
+        ExtendWave7B(b, methods);
         return new MemberTable<PlayerState>(TypeId, TypeName, "player", b.Members, methods);
     }
 
@@ -187,4 +223,16 @@ internal static partial class TMudPlayerMembers
     static partial void ExtendWave5C(FieldBuilder<PlayerState> b, List<MethodDef> methods);
 
     static partial void ExtendWave5D(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6A(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6B(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6C(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave6D(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave7A(FieldBuilder<PlayerState> b, List<MethodDef> methods);
+
+    static partial void ExtendWave7B(FieldBuilder<PlayerState> b, List<MethodDef> methods);
 }

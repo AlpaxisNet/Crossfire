@@ -299,6 +299,7 @@ internal sealed partial class Dispatcher : IMemberEnv
         ArchCollection collection = ArchCollector.Collect(arch);
         w.InitArchetypes(collection.Archetypes);
         InitSkills(w);
+        InitLanes(w);
 
         int count = 0;
         int parts = 0;

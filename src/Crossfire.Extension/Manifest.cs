@@ -56,6 +56,12 @@ internal static partial class Manifest
         RegisterWave5B(b);
         RegisterWave5C(b);
         RegisterWave5D(b);
+        RegisterWave6A(b);
+        RegisterWave6B(b);
+        RegisterWave6C(b);
+        RegisterWave6D(b);
+        RegisterWave7A(b);
+        RegisterWave7B(b);
         extra?.Invoke(b);
         return b;
     }

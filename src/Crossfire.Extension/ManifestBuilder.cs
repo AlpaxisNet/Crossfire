@@ -40,8 +40,26 @@ internal sealed record Lane(string Name, int FirstFunction, int LastFunction, in
     /// <summary>5D of wave 5.</summary>
     public static readonly Lane Wave5D = new("5D", 7000, 7999, 70, 79, 7000, 7999);
 
+    /// <summary>6A of wave 6: containers, sacks and keys.</summary>
+    public static readonly Lane Wave6A = new("6A", 8000, 8999, 80, 89, 8000, 8999);
+
+    /// <summary>6B of wave 6: the apply core and wearing.</summary>
+    public static readonly Lane Wave6B = new("6B", 9000, 9999, 90, 99, 9000, 9999);
+
+    /// <summary>6C of wave 6: food, drink, potions and poison.</summary>
+    public static readonly Lane Wave6C = new("6C", 10000, 10999, 100, 109, 10000, 10999);
+
+    /// <summary>6D of wave 6: signs, books, lighters and treasures.</summary>
+    public static readonly Lane Wave6D = new("6D", 11000, 11999, 110, 119, 11000, 11999);
+
+    /// <summary>7A of wave 7: the mudcommand table.</summary>
+    public static readonly Lane Wave7A = new("7A", 12000, 12999, 120, 129, 12000, 12999);
+
+    /// <summary>7B of wave 7: the account completion and trade.</summary>
+    public static readonly Lane Wave7B = new("7B", 13000, 13999, 130, 139, 13000, 13999);
+
     /// <summary>Every lane, the core first.</summary>
-    public static readonly IReadOnlyList<Lane> All = new[] { Core, Items, Start, Gmaps, Wave5A, Wave5B, Wave5C, Wave5D };
+    public static readonly IReadOnlyList<Lane> All = new[] { Core, Items, Start, Gmaps, Wave5A, Wave5B, Wave5C, Wave5D, Wave6A, Wave6B, Wave6C, Wave6D, Wave7A, Wave7B };
 
     /// <summary>The first member id of the lane's members of <c>TMudObject</c> (500 ids).</summary>
     public int ObjectMembersFirst => FirstMember;
