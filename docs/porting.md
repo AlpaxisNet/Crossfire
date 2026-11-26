@@ -151,6 +151,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | server/c_object.c | `pick_up_object` (the weight test only) | `Inventory.TooHeavy` | ported in the extension (`Gk/Inventory.cs`: his weight and what he carries plus the new weight against `weight_limit[Str]`; the rest of the function is lane 5A's) |
 | common/object.c | `present_arch_in_ob` | `Inventory.PresentArch` | ported for every stack of the archetype (`removeinvobject` takes from them in order) |
 | server/skill_util.c | `show_skills` (the level of a skill) | `Inventory.SkillLevel` | the level of the experience object, as that function's comment says |
+| server/c_object.c | `command_examine`, `examine`, `examine_monster`, `long_desc` | `Examine.CommandExamine`, `ExamineObject`, `ExamineMonster`, `LongDesc` | ported in the extension (`Gk/Examine.cs`); every `new_draw_info` is `CrossfireHost.DrawInfo`; `LOOK_OBJ` is written out; `inventory`, `draw_find` and the rest of c_object.c are not ported |
 | socket/item.c | `MarkItem` | `ItemMatching.MarkItem` | ported with the object already found (the client's tag is looked up by the caller, in the player's own tree) |
 | server/player.c | `fix_weight` | `ItemMatching.FixWeight`, `Dispatcher.FixWeight` | ported in the extension: for the players it is given; the extension calls it for a player at login (C calls it from its tick) |
 | socket/item.c | `query_flags` | `ItemStrings.QueryFlags` | ported in the extension (`Gk/ItemStrings.cs`); `ItemStrings.Flags` adds Graal Kingdoms' types 162 to 166 and `F_NOPICK` (docs/differences.md) |
@@ -223,7 +224,9 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | `cost_string_from_value` | `CfWorld.CostStringFromValue` | ported (returns the text; no static buffer) |
 | `query_cost_string` | `CfWorld.QueryCostString` | ported |
 | `query_money` | `CfWorld.QueryMoney` | ported |
-| `pay_for_amount`, `pay_for_item`, `pay_from_container`, `get_payment2`, `get_payment`, `sell_item` | none | not ported: they take coins out of inventories and send the changes to the client of Crossfire (`esrv_del_item`, `fix_player`, `draw_info`, the shop map squares); the price they use is `QueryCost` |
+| `pay_for_amount`, `pay_from_container` | `Money.PayForAmount`, `Money.PayFromContainer` | ported in the extension (`Gk/Money.cs`); the client calls are `CrossfireHost`'s hooks; the `FLAG_WAS_WIZ` lines (they name a variable the function does not have) are left out; the coin archetypes are looked up first (C would stop on a missing one) |
+| `sell_item` | `Money.AddCoins` | its coin loop (lines 538 to 570) is ported in the extension; the texts ("You receive ...", "We're not interested in ...") and `identify` are not: a script says them |
+| `pay_for_item`, `get_payment2`, `get_payment` | none | not ported: they pay for the unpaid objects of a shop (the shop floor is Graal Kingdoms' scripts' own) |
 | `shop_sort`, `add_shop_item`, `shop_listing` | none | not ported: the listing of the shop's map squares to a player |
 
 ### What the two files above call (other files)
@@ -238,7 +241,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | common/player.c | `find_skill`, `atnr_is_dragon_enabled`, `is_dragon_pl` | `CfWorld.FindSkill`, `AtnrIsDragonEnabled`, `IsDragonPl` | ported |
 | common/porting.c | `isqrt` | `CfWorld.Isqrt` | ported (64-bit sum, see differences) |
 | (C runtime) | `%+d`, `%.Nf` | `CStr.Plus`, `CStr.FormatFixed` | not ported from a Crossfire file; the behaviour of `printf` that item.c relies on |
-| include/spells.h | `spells[]` (`name`, `charges`) | `CrossfireHost.SpellName`, `SpellCharges` | not ported: the spell table is a later phase |
+| include/spells.h | `spells[]` (`name`, `charges`, `level`) | `CrossfireHost.SpellName`, `SpellCharges`, `SpellLevel` | not ported: the spell table is a later phase |
 | include/player.h | `struct pl` (`digestion`, `gen_*`) | `CrossfireHost.PlayerDigestion` .. | not ported: the player is the next phase |
 
 ## How to read the table

@@ -74,7 +74,11 @@ internal static partial class Manifest
             ("name", Val.Str(TMudArchMembers.TypeName)),
             ("host", Val.Str("object")),
             ("members", Val.List(TMudArchMembers.Members.Select(Member))),
-            ("methods", Val.List()))));
+            ("methods", Val.List(TMudArchMembers.Methods.Select(m => Val.Map(
+                ("id", Val.Int(m.Id)),
+                ("name", Val.Str(m.Name)),
+                ("params", Val.List(m.Params.Select(Val.Str))),
+                ("ret", Val.Str(m.Ret)))))))));
         b.AddType(Lane.Core, new TypeDef(TMudObjectMembers.TypeId, TMudObjectMembers.TypeName, TMudObjectMembers.Table.ToManifest(b.LinkMinor)));
         b.AddType(Lane.Core, new TypeDef(TMudPlayerMembers.TypeId, TMudPlayerMembers.TypeName, TMudPlayerMembers.Table.ToManifest(b.LinkMinor)));
         b.AddEvent(Lane.Core, new EventDef(EventOnUpdateObject, "object"));

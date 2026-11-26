@@ -279,3 +279,23 @@ functions").
   known. `mudlistspells` writes the spell paths and no spell, because the port has no spell table (a player's spells are numbers).
 - **`mudresetinvobject`** is `copy_object` of the archetype's clone over the item: the extra lines (`mudowner`, `mudrealname`) are gone;
   count, identified and applied state are kept. `mudorderinventory` is a relinking of the inventory, saved with the account.
+## Money and examine in the extension (lane 5C of phase 3)
+
+- **Division by zero and missing archetypes.** `pay_for_amount` and the coin loop look up the three coin archetypes first and
+  refuse (false, an error line) when one is missing or has no value, where C would dereference a null pointer or divide by zero.
+  `examine_monster` writes no life line for a monster whose `maxhp + 1` is 0, where C stops with a division by zero.
+- **`pay_for_amount`** answers false for a negative amount (C's callers never ask for one) and its `FLAG_WAS_WIZ` lines, which name
+  a variable the function does not have, are left out.
+- **Kept from C so that nobody fixes it:** "You would get ... for the it." / "for the them." (the C format string); the `@match` test
+  of `examine` leaves out only a message that is exactly `@match` (`strncasecmp` with 7 compares the end of the pattern too); `pay_for_amount`
+  says true when a coin that is no coin of the shop (a changed value) was not taken apart and less was paid than was asked; a player's price is
+  4 times the value times the bargain by charisma (`query_cost`).
+- **Identified at creation.** Every object made for a script comes from `Dispatcher.NewItem`, identified, including the coins of
+  `mudaddmoney` and the change; the original network's choice is not known (docs/mud-phase3.md 4.3, question 11). An unidentified
+  stack of coins and an identified one do not merge on insert (C's `CAN_MERGE`), so a player may hold two stacks of one coin until
+  the next payment, which merges them as `pay_from_container` does.
+- **`mudvalue` of an archetype** prices one object made of it (identified, `nrof` 1); of an object, the stack as it is. A flag other
+  than 0 and 1 is refused (C has `F_TRUE`, which no script uses).
+- **`mudobjectattr`** is Alpaxis's: the scripts show the attribute names and the call forms only. `weight` and `value` are of one
+  piece, `name` is what the window shows, an archetype is read as one object made of it.
+- **`SpellLevel`** is a new member of `CrossfireHost` (like `SpellName`): the level of `spells[]`, 0 until the spell phase.

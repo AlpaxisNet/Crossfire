@@ -283,7 +283,9 @@ that tells `Abc` from `abc` (Linux).
 
 `stats` returns a flat map of ints. The totals: `requests`, `errors`, `frames_in`, `frames_out`, `bytes_in`, `bytes_out` (frames
 including their 4-byte length; the HELLOs are not counted in `frames_in`), `pings`, `spin_hits`, `spin_misses`, `archetypes`, `tags`,
-`ticks`, `last_tick_ms`, `flushes`, `levels`, `level_objects` (the objects of the levels held), `players`. The GC: `gc_gen0`, `gc_gen1`, `gc_gen2` (collection counts of the process),
+`ticks`, `last_tick_ms`, `flushes`, `levels`, `level_objects` (the objects of the levels held), `players`, `examine_lines` (the lines of text
+that examine wrote, each one `onRPGMessage` event on a 1.1 link: counted apart from other events, so that the host's "events skipped" is
+not read as examine's). The GC: `gc_gen0`, `gc_gen1`, `gc_gen2` (collection counts of the process),
 `gc_pause_ns` (`GC.GetTotalPauseDuration`), `gc_allocated_bytes`. The writer: `writer_writes` (passes), `writer_files`,
 `writer_failures`, `writer_ns_total`, `writer_ns_max` (time of a pass). For each op that was called, with `<op>` one of
 `session_init`, `session_tick`, `session_flush`, `session_shutdown`, `get`, `set`, `get_many`, `get_list`, `invoke`, `stats`,
@@ -376,8 +378,12 @@ With Graal Kingdoms' own world, three tests (skipped without the variables) repo
 | `mudlistskills` | 5010 | none | `void` | lane 5B, 1.1 only: `this.skill<i>` |
 | `mudlistspells` | 5011 | none | `void` | lane 5B, 1.1 only: `this.spellpaths` and the end marker `this.spell0` |
 | `mudlistequipment` | 5012 | none | `void` | lane 5B, 1.1 only: `this.equipment<i>` |
+| `mudaddmoney` | 6000 | `int` | `void` | lane 5C ("Money and examine", below; slow): the player of the request's context gets coins (n above 0) or pays (n below 0, with change; everything he has when it is less) |
+| `mudpay` | 6001 | `int` | `bool` | lane 5C (slow): the player of the context pays; false and no change when he has less; the method of `TMudPlayer` is the same |
+| `mudobjectattr` | 6002 | `string`, `string` | `string` | lane 5C: `("money", n)` is the text of an amount in coins; `(id or archetype name, attribute)` an attribute of an item of the context player or an archetype; "" for what is not there |
+| `mudexamineinvobject` | 6003 | `int` | `bool` | lane 5C: the player of the context examines the item of that id in his own tree; false when there is none |
 
-Three types: `TMudArch` (id 1, host `object`, no methods), whose members are all read-only (`access` "r") and **stable**: an
+Three types: `TMudArch` (id 1, host `object`, one method: `mudvalue`, 6750, lane 5C), whose members are all read-only (`access` "r") and **stable**: an
 archetype never changes; `TMudObject` (id 2, host `npc`) and `TMudPlayer` (id 3, host `player`), below. Three events (below), no
 tick, `limits.max_list` 256.
 
@@ -605,9 +611,15 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | --- | --- | --- | --- | --- |
 | `cloneMudObject` | 300 | `float`, `float` | `handle:TMudObject` | objects.md F6 (EVIDENCED, 8 calls): a copy at (x, y) of the same level with the mud state, not the script variables |
 | `destroymudobject` | 301 | none | `void` | objects.md F5 (EVIDENCED, 38 calls): the object leaves the level, `npc.remove`, no `onMudDestroy` |
+| `mudvalue` | 6000 | `int` | `int` | lane 5C ("Money and examine", below): `query_cost` of the stack; 0 is what a shop asks, 1 what it pays |
+| `mudidentify` | 6001 | none | `void` | lane 5C: `identify` of the object (slow: busy answers before it changes) |
+| `examine` | 6002 | none | `void` | lane 5C: the player of the request's context examines the object |
+| `mudexamineobject` | 6003 | none | `void` | lane 5C: the same as `examine` |
 
 Not here, because they need the rules of phases 3 and 4 (`muddecreasequantity` is lane 5B's, below): `mudvalue`, `getresistance`, `setresistance`, `apply`,
 `examine`, `mudidentify`, the attack methods; the members `mudowner`, `muditems`, `mudenvironment`, `mudmoney`, `datablock`,
+Not here, because they need the rules of phases 3 and 4: `muddecreasequantity`, `getresistance`, `setresistance`, `apply`,
+the attack methods; the members `mudowner`, `muditems`, `mudenvironment`, `mudmoney`, `datablock`,
 `dontmuddestroy` (a script flag), the resistances by name.
 
 #### Members of TMudPlayer
@@ -1078,3 +1090,63 @@ through `decrease_ob_nr`, `removeinvobjects` stopping after one stack, a decreas
 the spell paths one short, the equipment list not filtered. Not caught, and equivalent: leaving out `ps.Dirty = true` after an add (the
 object model's hooks mark the account dirty as well).
 
+## Money and examine (lane 5C of phase 3, wave 5)
+
+Money is the coins of a player's tree; examine is the text of C's `examine`. The code is `Gk/Money.cs`, `Gk/MoneyObjectAttr.cs`,
+`Gk/Examine.cs`, `Dispatcher.Wave5C.cs` and the manifest files `Gk/Manifest.Wave5C.cs`, `Gk/TMudObjectMembers.Wave5C.cs`;
+`MoneyTests.cs` and `ExamineTests.cs` test it (docs/mud-phase3.md sections 4.3 and 4.5).
+
+**Money** (ported: `Gk/Money.cs`, from server/shop.c `pay_for_amount`, `pay_from_container` and the coin loop of `sell_item`).
+
+- **`mudaddmoney(n)`**: *n* above 0 gives the coins of the sale loop: platinum first, then gold and silver; each kind first into the
+  applied containers whose race holds "gold" (up to their weight limit), then into the pack **with no weight test** (the 10,000
+  platinum coins of the start tasks). *n* below 0 takes `-n` the way `pay_for_amount` does, with change in coins; when the player has
+  less, everything he has in money goes and the call returns. Graal Kingdoms passes differences, so the sum is exact: a test sets
+  the money to a series of amounts with `mudaddmoney(amount - mudmoney)`. 0 and nil change nothing; a float is cut; a text is `bad_args`.
+- **`mudpay(n)`** (function of the context player, and method 6500 of `TMudPlayer`): `pay_for_amount`. The pack pays first with the
+  smallest coins first (silver, gold, platinum), the change comes back in smaller coins, and then each applied container whose
+  `race` is empty or holds "gold" (the same test as `query_money`, which `mudmoney` is). False and **no change at all** when the
+  player has less than the price; 0 is paid at once; a negative price is false. Coins that are no coin of the shop (a silver coin
+  whose value was changed) stay where they are and one error line is logged (C's `in pay_for_item: Did not find string match`); two
+  stacks of one coin are merged (C's "has two money entries" error is logged).
+- **`mudvalue(flag)`** (method 6000 of `TMudObject`, for an item of a player and for an object of a level; method 6750 of `TMudArch`):
+  `query_cost` of the stack for the charisma of the player of the request's context (none: no bargaining; the player's Cha and
+  bargaining skill otherwise, **so a player's price is 4 times the value times the bargain**, as in C). 0 is `F_BUY`, 1 is
+  `F_SELL`, any other flag is `bad_args`. The archetype's method prices one object made of it as a script would make it (identified,
+  `nrof` 1), so that a coin archetype is worth its value.
+- **Identified at creation** (docs/mud-phase3.md 4.3, question 11): every object a script or the engine makes comes from
+  `Dispatcher.NewItem`, which sets `FLAG_IDENTIFIED`; the coins of `mudaddmoney` and of change too. A potion made that way sells for its
+  value and is bought for its value; the same potion read from a file that does not say `identified 1` still sells for 1,000 each (at
+  most 600 for the stack) and is asked 50 times its value, as `query_cost` says. The coins that are made therefore do not merge with
+  a stack of the file that is not identified; the next payment merges them.
+- **`mudidentify()`** (method 6001 of `TMudObject`): `identify` (the flag, the name of a potion's archetype, `esrv_send_item`); the
+  account or level that holds the object is saved and the strings of the window are written again. It calls `CheckBusy()`.
+- **`mudobjectattr(a, b)`**: `("money", n)` (any case; *n* a number or its text, the fraction cut) is `cost_string_from_value`: "nothing",
+  "1 silver coin", "3 platinum coins and 1 gold coin". Otherwise *a* is the id of an item in the context player's own tree
+  (digits, or a number) or an archetype name, and *b* is `archname` (the archetype's name), `name` (`query_short_name`, what the
+  window shows), `icon`, `food`, `type`, `quantity` (`nrof`), `weight` (of one, in grams) or `value` (of one), each as text; "" for
+  an unknown attribute, an id that is not in the player's tree (another player's, a level object's, a dead one) and a name that is
+  no archetype. An archetype is read as one object made of it, so its name is the singular and its quantity is at least 1. These are
+  Alpaxis's choices where the scripts show no more than the names.
+- Errors that C logs with `LOG(llevError, ...)` in these calls (a coin that is not one, asking the buy price of an unidentified object)
+  are forwarded to the host's log, the first five of a request.
+
+**Examine** (ported: `Gk/Examine.cs`, from server/c_object.c `command_examine`, `examine`, `examine_monster`, `long_desc`).
+
+- **`mudexamineinvobject(id)`** (function): the item of that id in the player's own tree (the top level, the open container and the
+  sacks: `FindItemById` with `deep`); true when it was examined, false and no line otherwise (another player's id, a level object's,
+  a dead or unknown one). **`examine()`** and **`mudexamineobject()`** (methods of `TMudObject`, an item or an object of a level,
+  the monsters of a shop floor too): the same for that object; the player is the one of the request's context (none: `bad_args`).
+  None of the three changes anything, so they run while the extension is busy. `mudexamineinvobject2` and the trade scripts are
+  wave 7's.
+- **The lines** are C's: "That is " and `long_desc` (the name, and `describe_item` for the types that have one), what the type adds
+  (a spell book's level, "Something is written in it.", a container's race and weight limit in kg, a wand's charges when it is
+  identified), the materials (only when the object has no message), "It weighs 3.000 kg." / "They weigh ..." (`%3.3f`), the price
+  ("It would cost you ..." for an unpaid object, else "You would get ... for the it." with C's wording), `examine_monster`'s lines for a
+  monster, the object's message (not for exits, books, corpses and walk-on objects, and not a message that is just `@match`;
+  "The object has a story:" before it for an identified object that needs identifying), and a blank line (" "). An object that is
+  not identified shows no magic: that is `describe_item`. A line is one `DrawInfo` call: the player event `onRPGMessage` with the
+  `client.text` effect as its fallback (on a 1.0 link the effect alone), so an examine is up to a dozen events; they are counted in
+  `stats` as `examine_lines`.
+- `command_examine` is ported but no script calls it yet (`mudcommand`, wave 7); the ground of its parameterless form is the objects
+  below the player, of which this extension's player has none.
