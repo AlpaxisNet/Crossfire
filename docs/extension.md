@@ -1069,7 +1069,7 @@ then `DropPlaceAt`); a failed query is the request's answer, nothing changed. `t
 
 **For the next waves.** `Dispatcher.PutObjectInSack` (`Func<op, sack, tmp, nrof, bool>`) is what `drop` calls while a container is
 open, and `Dispatcher.ApplySpecialUnapply` (`Func<op, tmp, int>`, zero for unapplied) what `drop_object` calls for an applied object;
-wave 6 sets both: lane 6A sets `PutObjectInSack` in `InitWave6A` ("Containers", below), 6B sets `ApplySpecialUnapply`; until 6B does, an applied object stays where it is, in a drop and in a put into a container. `Pickup.SackCanHold` is the port of
+wave 6 sets both: lane 6A sets `PutObjectInSack` in `InitWave6A` ("Containers", below), 6B sets `ApplySpecialUnapply` in `InitWave6B` (at `session.init`), so an applied object is unapplied first, in a drop and in a put into a container; a test that wants the hook missing sets it to null. `Pickup.SackCanHold` is the port of
 `sack_can_hold` for `put_object_in_sack`. A pick up into a container uses `Pickup.PickUp`'s search for an applied container.
 ## Containers (lane 6A of wave 6; docs/mud-phase3.md sections 4.2, 4.4 and 5)
 
@@ -1140,6 +1140,13 @@ a sack "vibrates as you approach the door" and is not used; the other two settin
 
 **For the next lanes.** 6B's `manual_apply` asks `ApplyByLane` first and needs nothing else of this lane. 6E's e2e of a `restrictaccess`
 container as a level face calls `defaultApply` on the face, which reaches `ApplyWave6A` with the level object's `CfObject`.
+
+**Fix lane of wave 6, containers.** A container on the ground that goes away while a player has it open is closed first, as
+`esrv_apply_container` closes it (the player is told "You close ..."): `level.unload` and the destruction of the object by a script
+do it (`Dispatcher.CloseOpenOn`), so that `Player.Container` never names a freed object and a drop never puts his things into it. Walking
+away from an open ground container is still not ported (docs/differences.md, "Containers"). Whatever leaves a container that lies on the
+ground (`pick_up_object` of an object in it, `take` and `esrv_move_object` alike) sets `Pickup.From` to that level, so the level's
+file is written first and the account's second.
 
 ## The inventory functions (lane 5B)
 
@@ -1335,6 +1342,11 @@ method of its own, so it has no id in its ranges; its callers (6B's `apply`, `mu
   focus may change. A dragon without the forces eats it as a normal player.
 - **The player event `onEatFood(foodarch, food, wascursed)`** (`Manifest.EventOnEatFood`, `handle:TMudArch`, `handle:TMudObject`, `int`;
   a 1.1 key) follows the state change of a player's food, drink or flesh, after the object is used up; it is not sent on a 1.0 link.
+
+**Fix lane of wave 6, consumables on the ground.** What `ApplyWave6C` applies of an object that lies on a level (`mudapplyobject`,
+the face's `apply`) is used up of its face too: the last one frees the object, kills the face's handle, removes its NPC (`npc.remove`) and
+marks the level dirty; one of a stack marks the level dirty and sends `onUpdateObject` (`Dispatcher.UsedUpOnGround`). Food that needs
+`cast_change_attr` (a stat or a protection) says "That is not available yet." and is not eaten.
 
 ## Signs, books, lighters and chests (lane 6D of phase 3, wave 6)
 

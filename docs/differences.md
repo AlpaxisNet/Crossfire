@@ -289,7 +289,7 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
   colour (`NDI_BROWN` is not carried by `DrawInfo`). The message says "the door" for a locked container too, as C does.
 - **Nothing closes an open container when the player walks away** (C's `FLAG_WALK_OFF` sets it up; the host moves the player, not this
   world), and the `EVENT_CLOSE` of the plugins is not run. A container on the ground opened here stays open (and its `applied`, `walk_off`
-  and `fly_off` are in the level file) until closed or until the player logs out; after a restart the level object is "applied" with nobody
+  and `fly_off` are in the level file) until closed, until the player logs out, or until its level unloads or a script destroys it (both close it first, `CloseOpenOn`); after a restart the level object is "applied" with nobody
   holding it open, which `esrv_apply_container` handles as C does (it is cleared and set again by the next open).
 - **A container on the ground has no item string and no `findinvobjectbyid` id.** Its tag is the one of its proxy, shown in
   `mud_container` and accepted by `mudmoveinvobject`. A container that is picked up whole while it is open keeps `op->container`: close it first.
