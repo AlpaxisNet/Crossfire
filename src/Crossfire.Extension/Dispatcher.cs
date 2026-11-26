@@ -642,9 +642,12 @@ internal sealed partial class Dispatcher : IMemberEnv
         }
         return WithTarget(args[0], t => t switch
         {
-            LevelObject lo => InvokeOnObject(lo, method, args[2].Items),
-            PlayerState ps => InvokeStartMethod(ps, method, args[2].Items) ?? Outcome.Fail(Status.BadArgs, "unknown method"),
-            _ => Outcome.Fail(Status.BadArgs, "unknown method"),
+            // a lane's method first (Dispatcher.Lanes.cs): the core's InvokeOnObject answers every method it does not know with bad_args
+            LevelObject lo => InvokeLaneMethod(lo, method, args[2].Items) ?? InvokeOnObject(lo, method, args[2].Items),
+            PlayerState ps => InvokeStartMethod(ps, method, args[2].Items)
+                ?? InvokeLaneMethod(ps, method, args[2].Items)
+                ?? Outcome.Fail(Status.BadArgs, "unknown method"),
+            _ => InvokeLaneMethod(t, method, args[2].Items) ?? Outcome.Fail(Status.BadArgs, "unknown method"),
         });
     }
 

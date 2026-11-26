@@ -738,6 +738,15 @@ lane's work in `BindMember` when it adds a new target class.
 
 **Tests.** `ExtensionOptions.ExtraManifest` registers what only a test needs, after the lanes.
 
+### Methods of the lanes
+
+A method a wave 5 lane declares (with `b.NextMethodId()` in its `Extend...` partial) is run by the same lane: `Dispatcher.Invoke`
+asks `InvokeLaneMethod` (`Dispatcher.Lanes.cs`) first for a level object or an item's proxy, after the start path's methods for a
+player, and for any other target (an archetype) before it answers `unknown method`. `InvokeLaneMethod` asks the partial methods
+`InvokeWave5A` to `InvokeWave5D` in that order, each implemented in the lane's own `Dispatcher.Wave5A.cs` to `Dispatcher.Wave5D.cs`,
+and the first answer that is not null is the call's. A lane answers null for a method id that is not in its range, so the order
+decides nothing; a lane checks its own arguments, and a method that changes items or money calls `CheckBusy()` first.
+
 ### The player controller
 
 `Gk/PlayerController.cs`: `Player : IPlayerHandle` is the C `struct pl` as far as phase 3 reads it: `Count`, `CountLeft` (uint),
