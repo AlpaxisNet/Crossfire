@@ -413,6 +413,23 @@ public class MapFileTests
     }
 
     [Fact]
+    public void SaveObjects_Given_a_unique_object_that_is_not_a_floor_and_a_plain_object_above_it_When_saved_Then_only_the_unique_one_goes_to_the_second_text()
+    {
+        // Arrange
+        CfWorld w = World(out _);
+        CfObject unique = Make(w, "bag");
+        unique.SetFlag(Define.FLAG_UNIQUE);
+        CfObject plain = Make(w, "sword");
+
+        // Act
+        string text = Save(w, 0, out string uniqueText, new[] { unique, plain });
+
+        // Assert
+        Assert.Equal("arch sword\nend\n", text);
+        Assert.Equal("arch bag\nunique 1\nend\n", uniqueText);
+    }
+
+    [Fact]
     public void SaveObjects_Given_a_saved_text_When_loaded_by_load_objects_Then_the_objects_come_back_equal()
     {
         // Arrange

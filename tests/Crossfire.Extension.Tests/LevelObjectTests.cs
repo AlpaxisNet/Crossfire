@@ -13,16 +13,23 @@ namespace Crossfire.Extension.Tests;
 public sealed class LevelObjectDirectTests : LevelObjectTests
 {
     internal override IExt Start(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool owns = true) => new DirectExt(world, options, epoch, owns);
+
+    internal override IExt StartSmallFrames(TempFolder world) => new DirectExt(world, null, 1, true, 65_536);
 }
 
 public sealed class LevelObjectSocketTests : LevelObjectTests
 {
     internal override IExt Start(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool owns = true) => new SocketExt(world, options, epoch, owns);
+
+    internal override IExt StartSmallFrames(TempFolder world) => new SocketExt(world, null, 1, true, 65_536);
 }
 
 public abstract class LevelObjectTests
 {
     internal abstract IExt Start(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool owns = true);
+
+    /// <summary>The extension with the smallest frames the protocol allows (65,536 bytes).</summary>
+    internal abstract IExt StartSmallFrames(TempFolder world);
 
     private IExt Hall(ExtensionOptions? options = null) => Start(ObjectWorld.Make(("hall.nw", ObjectWorld.SeedHall), ("many.nw", ObjectWorld.Many(150))), options);
 
@@ -1359,5 +1366,128 @@ public abstract class LevelObjectTests
         Assert.Empty(places);
         Assert.True(added.Result.IsNil);
         Assert.True(Directory.Exists(Path.Combine(folder, "locked.nw.map")));
+    }
+
+    // ------------------------------------------------------------------ more branches
+
+    [Fact]
+    public void ObjectsBlobs_Given_a_row_with_more_than_four_items_When_sent_Then_bad_args()
+    {
+        // Arrange
+        using IExt ext = Hall();
+        (List<Val> places, _) = LoadAll(ext, "hall.nw");
+
+        // Act
+        ReplyFrame r = ext.Call(16, new[] { Val.List(Val.List(places[0].Get("handle")!, Val.Int(1), Val.Int(2), S("b"), S("extra"))) });
+
+        // Assert
+        Assert.Equal((ulong)Status.BadArgs, r.Status);
+    }
+
+    [Fact]
+    public void MudAddObject_Given_an_empty_level_name_When_called_Then_nil_and_the_line_says_the_call_has_no_level()
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make());
+        int before = ext.Logs.Count;
+
+        // Act
+        ReplyFrame r = ext.Call(Manifest.OpMudAddObject, new[] { N(1), N(1), S("banana") }, level: "");
+
+        // Assert
+        Assert.True(r.Result.IsNil);
+        Assert.Contains("no level", Assert.Single(ext.Logs.Skip(before)).Text);
+    }
+
+    [Fact]
+    public void ObjectsBlobs_Given_an_empty_blob_for_an_object_with_script_variables_When_sent_Then_the_variables_of_the_file_are_gone_for_good()
+    {
+        // Arrange
+        using IExt ext = Hall();
+        (List<Val> places, _) = LoadAll(ext, "hall.nw");
+        ulong banana = places[0].Get("handle")!.AsHandle;
+        Assert.NotEmpty(places[0].Get("props")!.Pairs);
+
+        // Act
+        Assert.Equal(0UL, ext.Call(16, new[] { Val.List(Val.List(H(banana), N(3.328125), N(1.125), S(""))) }).Status);
+        string text = Flushed(ext, "levels/hall.nw.map", t => !t.Contains("flag born"));
+        Assert.Equal(0UL, ext.Call(8, new[] { S("hall.nw") }).Status);
+        (List<Val> again, _) = LoadAll(ext, "hall.nw");
+
+        // Assert
+        Assert.DoesNotContain("flag ", text.Substring(0, text.IndexOf("arch sword", StringComparison.Ordinal)));
+        Assert.Empty(again[0].Get("props")!.Pairs);
+        Assert.True(again[0].Get("blob")!.IsNil);
+    }
+
+    [Fact]
+    public void Level_Given_a_file_with_an_empty_mudblob_line_When_loaded_Then_the_blob_is_nil()
+    {
+        // Arrange
+        TempFolder world = ObjectWorld.Make();
+        Directory.CreateDirectory(Path.Combine(world.Path, "data", "levels"));
+        File.WriteAllText(Path.Combine(world.Path, "data", "levels", "b.nw.map"), "arch map\nname b.nw\nend\narch banana\nmudx 1\nmudy 2\nmudblob \nend\n");
+        using IExt ext = Start(world);
+
+        // Act
+        (List<Val> places, _) = LoadAll(ext, "b.nw");
+
+        // Assert
+        Assert.True(Assert.Single(places).Get("blob")!.IsNil);
+    }
+
+    [Fact]
+    public void CloneMudObject_Given_an_object_that_is_not_saved_When_cloned_Then_the_clone_is_not_saved_either()
+    {
+        // Arrange
+        using IExt ext = Hall();
+        (List<Val> places, _) = LoadAll(ext, "hall.nw");
+        ulong sword = places[1].Get("handle")!.AsHandle;
+        Set(ext, sword, Obj("savelocally"), Val.False);
+        ReplyFrame r = ext.Call(13, new[] { H(sword), Val.Int(TMudObjectMembers.MethodCloneMudObject), Val.List(N(1), N(1)) });
+
+        // Act
+        string text = Flushed(ext, "levels/hall.nw.map");
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.DoesNotContain("arch sword", text);
+        Assert.False(Get(ext, r.Result.AsHandle, Obj("savelocally")).AsBool);
+    }
+
+    [Fact]
+    public void Set_Given_a_change_after_the_level_was_flushed_When_flushed_again_Then_the_file_has_the_change()
+    {
+        // Arrange
+        using IExt ext = Hall();
+        (List<Val> places, _) = LoadAll(ext, "hall.nw");
+        Flushed(ext, "levels/hall.nw.map");
+        Thread.Sleep(100); // the writer has written it: the level is clean now
+
+        // Act
+        Assert.Equal(0UL, Set(ext, places[1].Get("handle")!.AsHandle, Obj("mudtitle"), S("of Doom")).Status);
+        string text = Flushed(ext, "levels/hall.nw.map", t => t.Contains("title of Doom"));
+
+        // Assert
+        Assert.Contains("title of Doom\n", text);
+    }
+
+    [Fact]
+    public void LevelLoad_Given_an_object_whose_place_would_not_fit_a_frame_When_loaded_Then_it_is_given_up_with_a_log_line_and_the_others_load()
+    {
+        // Arrange
+        using IExt ext = StartSmallFrames(ObjectWorld.Make(("hall.nw", ObjectWorld.SeedHall)));
+        (List<Val> placed, _) = LoadAll(ext, "hall.nw");
+        ulong huge = placed[0].Get("handle")!.AsHandle;
+        Assert.Equal(0UL, ext.Call(16, new[] { Val.List(Val.List(H(huge), Val.Int(1), Val.Int(1), S(new string('x', 65_420)))) }).Status);
+        Assert.Equal(0UL, ext.Call(8, new[] { S("hall.nw") }).Status);
+        int before = ext.Logs.Count;
+
+        // Act
+        (List<Val> again, _) = LoadAll(ext, "hall.nw");
+
+        // Assert
+        Assert.Equal(2, again.Count);
+        Assert.Contains(ext.Logs.Skip(before), l => l.Text.Contains("too large to show"));
     }
 }

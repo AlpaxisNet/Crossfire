@@ -86,13 +86,13 @@ internal sealed class DirectExt : IExt
     private ulong nextReq = 1;
     private bool ended;
 
-    public DirectExt(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool ownsWorld = true)
+    public DirectExt(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool ownsWorld = true, long maxFrame = 16_777_216)
     {
         World = world;
         this.ownsWorld = ownsWorld;
         options ??= new ExtensionOptions { Writer = new FileWriterOptions { Quiet = TimeSpan.FromMilliseconds(20), MaxDelay = TimeSpan.FromMilliseconds(100) } };
-        HostHello hello = HostHello.Parse(ScriptedHost.HostHello(world.Path, epoch));
-        dispatcher = new Dispatcher(hello, 16_777_216, (level, text) => Logs.Add(new LogFrame((ulong)level, text)), options, new Counters());
+        HostHello hello = HostHello.Parse(ScriptedHost.HostHello(world.Path, epoch, maxFrame: maxFrame));
+        dispatcher = new Dispatcher(hello, (int)maxFrame, (level, text) => Logs.Add(new LogFrame((ulong)level, text)), options, new Counters());
         Assert.Equal(0UL, Call(1).Status);
     }
 
@@ -133,12 +133,12 @@ internal sealed class SocketExt : IExt
     private readonly bool ownsWorld;
     private bool ended;
 
-    public SocketExt(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool ownsWorld = true)
+    public SocketExt(TempFolder world, ExtensionOptions? options = null, long epoch = 1, bool ownsWorld = true, long maxFrame = 16_777_216)
     {
         World = world;
         this.ownsWorld = ownsWorld;
         options ??= new ExtensionOptions { Writer = new FileWriterOptions { Quiet = TimeSpan.FromMilliseconds(20), MaxDelay = TimeSpan.FromMilliseconds(100) } };
-        host = ScriptedHost.Handshake(world.Path, out _, options, epoch);
+        host = ScriptedHost.Handshake(world.Path, out _, options, epoch, maxFrame);
         Assert.Equal(0UL, host.Init().Status);
     }
 
