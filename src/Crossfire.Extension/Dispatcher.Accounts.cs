@@ -156,13 +156,24 @@ internal sealed partial class Dispatcher
     /// <summary>Writes the account's file (through the writer). An account that was unloaded (<c>unloadmudaccount</c>) writes nothing: its file is kept.</summary>
     private void SubmitAccount(PlayerState player)
     {
+        (string, byte[])? file = AccountFile(player);
+        if (file != null)
+        {
+            PutFile(file.Value.Item1, file.Value.Item2);
+        }
+    }
+
+    /// <summary>The file of an account (its path under the data folder and its content), and its dirty flag cleared; null when it has no usable file name or was unloaded (<c>unloadmudaccount</c>: its file is kept).</summary>
+    private (string, byte[])? AccountFile(PlayerState player)
+    {
         string? rel = FileNames.AccountFile(player.FileKey);
         if (rel == null || !player.Loaded)
         {
-            return;
+            return null;
         }
-        PutFile(rel, AccountFileBytes(player));
+        byte[] bytes = AccountFileBytes(player);
         player.Dirty = false;
+        return (rel, bytes);
     }
 
     /// <summary>The text of the account's file: the player's object as <c>save_object</c> writes it, and the name of the file's account after its first line.</summary>

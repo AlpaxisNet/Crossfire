@@ -214,6 +214,37 @@ row that is not is `bad_args` and nothing is applied. A row for a dead, unknown 
   the end of the connection (every logged-in account each time). Inventories, skills and money are phase 3: a block nested in a
   player's file is read and written back as it is.
 
+### Moves across files (the write order)
+
+Alpaxis's own rule (no Crossfire counterpart; the suite's `mud-phase3.md` section 3, rule 9). A level file and an account file are
+written separately, each after the quiet time. An object that moves between two of them (pick up, drop, a trade, a shop buy,
+`mudaddobject` followed by `mudpickupobject(1)`) would be lost or copied by a crash between the two writes, depending on which was
+written first. A move therefore goes to the writer as one unit, with the SOURCE file first:
+
+- `FileWriter.SubmitMove(sourcePath, sourceContent, destinationPath, destinationContent)` hands over the whole new content of both
+  files. The writer writes **the source file, then the destination file**, in one pass, **at once** (not after the quiet time), and
+  the destination only when the source is on disk. A crash between the two writes can lose the object (the source no longer has
+  it, the destination does not yet), never copy it: the destination is never on disk before the source. The two paths must differ
+  (`ArgumentException`, like a path outside the data folder).
+- `Dispatcher.SubmitMove(sourceLevel, sourcePlayer, destinationLevel, destinationPlayer)` is the call of the operations that move
+  an object: it makes the files of the two sides (exactly one of level and player for each), clears their dirty flags and calls the
+  writer's `SubmitMove`. It is called after the operation changed both sides (the destination holds the object, the source does
+  not). A side without a usable file name is submitted alone as an ordinary file; the other side then waits for the quiet time.
+- **Older content is superseded.** The submission of a move replaces earlier pending or retrying content of both files; a later
+  `Submit` of either file while the move waits (its source failed) replaces that file's content in the move, which keeps its place.
+- **Order of moves.** Moves are written in the order they were submitted, before the ordinary files of the pass. A move waits for
+  every older move that shares a file with it (a failed or waiting one), so a later move never puts the object in a destination
+  while an older move's source file still has it.
+- **Failures** follow "The files" above. A move whose source write fails does not write its destination; it waits with the
+  back-off of that file (the quiet time, twice that, ... up to 30 s) and is given up after `MaxFailedPasses` passes (neither file
+  is written; `session.shutdown` with `save` true answers `internal`). A name the system refuses for the source gives the move up at
+  once. A failure of the destination after the source was written is that file's own failure: it is tried again alone, with its own
+  back-off (the object stays lost until it is written, never copied). `Discard` drops waiting moves.
+- **Test hook**: `FileWriterOptions.BetweenMove(source, destination)` runs on the writer thread after the source file is on disk and
+  before the destination is written. `tests/Crossfire.WriterChild` is a real process that stops there; the fault tests kill it with
+  SIGKILL for a pick up (level to account), a drop (account to level) and a trade (account to account), reload both files and count
+  the object (zero, never two).
+
 ### File names
 
 A level or account name becomes a file name by `FileNames.Escape`: the UTF-8 bytes of the name; the ASCII letters, digits, `_` and

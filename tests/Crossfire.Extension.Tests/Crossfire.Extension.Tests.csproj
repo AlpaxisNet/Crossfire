@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Crossfire.Extension\Crossfire.Extension.csproj" />
     <ProjectReference Include="..\..\src\Crossfire\Crossfire.csproj" />
+    <ProjectReference Include="..\Crossfire.WriterChild\Crossfire.WriterChild.csproj" />
   </ItemGroup>
 
 </Project>

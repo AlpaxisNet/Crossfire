@@ -279,15 +279,52 @@ internal sealed partial class Dispatcher
     /// <summary>Writes the level's file (through the writer) and clears its dirty flag.</summary>
     private void SubmitLevel(Level level)
     {
+        (string, byte[])? file = LevelFile(level);
+        if (file != null)
+        {
+            PutFile(file.Value.Item1, file.Value.Item2);
+        }
+    }
+
+    /// <summary>The file of a level (its path under the data folder and its content), and its dirty flag cleared; null when it has no usable file name.</summary>
+    private (string, byte[])? LevelFile(Level level)
+    {
         string? rel = FileNames.LevelFile(level.Name);
         if (rel == null || refused.Contains("level:" + level.Name))
         {
             log(1, "level " + level.Name + " has no usable file name and is not saved");
             level.Dirty = false;
+            return null;
+        }
+        byte[] content = FileText.ToBytes(LevelFiles.Write(world!, level));
+        level.Dirty = false;
+        return (rel, content);
+    }
+
+    /// <summary>
+    /// A move of an object across a level file and an account file, or two account files (pick up, drop, trade, shop buy: the write
+    /// order across files of docs/extension.md "Moves across files"): hands the writer both files and has the SOURCE file written first
+    /// and the DESTINATION second, in one pass and at once. Called by the operation that moved the object after it changed both sides;
+    /// both dirty flags are cleared. A side that has no file (no usable name) is submitted alone, as an ordinary file.
+    /// </summary>
+    internal void SubmitMove(Level? sourceLevel, PlayerState? sourcePlayer, Level? destinationLevel, PlayerState? destinationPlayer)
+    {
+        (string, byte[])? source = sourceLevel != null ? LevelFile(sourceLevel) : sourcePlayer != null ? AccountFile(sourcePlayer) : null;
+        (string, byte[])? destination = destinationLevel != null ? LevelFile(destinationLevel) : destinationPlayer != null ? AccountFile(destinationPlayer) : null;
+        if (source != null && destination != null && source.Value.Item1 != destination.Value.Item1)
+        {
+            recent[source.Value.Item1] = source.Value.Item2;
+            recent[destination.Value.Item1] = destination.Value.Item2;
+            writer!.SubmitMove(source.Value.Item1, source.Value.Item2, destination.Value.Item1, destination.Value.Item2);
             return;
         }
-        PutFile(rel, FileText.ToBytes(LevelFiles.Write(world!, level)));
-        level.Dirty = false;
+        foreach ((string, byte[])? file in new[] { source, destination })
+        {
+            if (file != null)
+            {
+                PutFile(file.Value.Item1, file.Value.Item2);
+            }
+        }
     }
 
     private void FreeCfObject(CfObject ob)
