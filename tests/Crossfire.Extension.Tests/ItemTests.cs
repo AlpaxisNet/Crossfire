@@ -1072,6 +1072,7 @@ public sealed class ItemTests
         Do(ext, "open", "bob", Val.Int((uint)items[2].Handle));
         ReplyFrame inOpen = Set(ext, bob, member, H(inside[0].Handle)); // in the open container: shown, but C's mark looks at the top level only
         Assert.Equal(ValKind.String, inOpen.Result.Kind);
+        Assert.Null(ext.Dispatcher.ControllerOf("bob")!.Mark);
     }
 
     [Fact]

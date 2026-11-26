@@ -783,7 +783,7 @@ dead tag, 0 and a value outside 32 bits give null. `IMemberEnv.ItemOfPlayer` is 
 ### The strings: `Shown` and the flush
 
 The ported C's `esrv_send_item` and `esrv_update_item` (the host's `EsrvSendItem`, `EsrvUpdateItem`) mark the item in the owning player's
-`ShownTable` (`Dispatcher.ItemSent`); `esrv_del_item` marks it removed and asks for a look at the whole window; a write of a member of an
+`ShownTable` (`Dispatcher.ItemSent`); `esrv_del_item` (C names the object by a count that a freed object has lost) asks for a look at the whole window; a write of a member of an
 item marks it. At the end of a request that ends with status 0 (`FlushControllers`) each marked controller is flushed once
 (`Dispatcher.FlushShown`): a request with marks only compares the marked items with what the client holds; a request after a change of the
 tree (or after the effects of a request were lost: `NeedsResend`, which also sends the 22 stats again) compares the whole window. Only a
