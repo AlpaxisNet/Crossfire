@@ -33,6 +33,7 @@ internal sealed partial class Dispatcher
     private readonly Dictionary<CfObject, ItemEntry> itemEntries = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<uint, ItemEntry> itemsByCount = new();
     private readonly ConditionalWeakTable<CfObject, object> itemOwners = new();
+    private readonly HashSet<CfObject> looseItems = new(ReferenceEqualityComparer.Instance);
     private bool shownCapLogged;
 
     /// <summary>How many objects have a live tag as an item (the test of the lifecycle reads it: 1,000 logins leave it where it was).</summary>
@@ -57,6 +58,10 @@ internal sealed partial class Dispatcher
             entry = new ItemEntry(proxy, ob.Count);
             itemEntries[ob] = entry;
             itemsByCount[ob.Count] = entry;
+            if (HolderOf(ob) == null)
+            {
+                looseItems.Add(ob); // in no player's tree (yet): the sweep of a flush sees it freed or arrived
+            }
         }
         handles.TagOf(entry.Wrapper); // may throw TagsUsedUpException: the request answers internal
         return entry.Wrapper;
@@ -109,6 +114,7 @@ internal sealed partial class Dispatcher
 
     private void KillItem(CfObject ob)
     {
+        looseItems.Remove(ob);
         if (itemEntries.Remove(ob, out ItemEntry? entry))
         {
             itemsByCount.Remove(entry.Count);
@@ -314,6 +320,8 @@ internal sealed partial class Dispatcher
         {
             TagItem(p, c);
         }
+        // the carried weight is the sum of the inventory (C's tick calls fix_weight; a file does not hold the sum)
+        ItemMatching.FixWeight(world!, new[] { p });
         p.Reconcile = true;
         p.Touch();
     }
@@ -470,6 +478,24 @@ internal sealed partial class Dispatcher
             SetShown(p, ItemStrings.ContainerName, "");
         }
         SweepTracked(p);
+        SweepLoose();
+    }
+
+    /// <summary>Items that got a tag outside a player's tree: killed when freed, handed to the player's sweep when they came into a tree.</summary>
+    private void SweepLoose()
+    {
+        foreach (CfObject item in looseItems.ToList())
+        {
+            if (item.QueryFlag(Define.FLAG_FREED))
+            {
+                KillItem(item);
+            }
+            else if (HolderOf(item) is { } holder)
+            {
+                looseItems.Remove(item);
+                holder.Tracked.Add(item);
+            }
+        }
     }
 
     /// <summary>The tags of the objects a player's tree lost: freed objects, objects now in another tree or nowhere.</summary>

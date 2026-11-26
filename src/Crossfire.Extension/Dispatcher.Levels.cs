@@ -336,6 +336,7 @@ internal sealed partial class Dispatcher
             {
                 SetClientString(ps, name, Text(stored));
             }
+            ps.Contr?.Touch(); // the flush of lane 4C writes the weight and its limit, which a stat (the strength) changes
         }
     }
 
@@ -456,7 +457,7 @@ internal sealed partial class Dispatcher
             log(1, function + ": level " + level.Name + " holds " + level.Objects.Count + " objects, the most it may");
             return null;
         }
-        CfObject ob = world.ArchToObject(at)!;
+        CfObject ob = NewItem(at);
         return Attach(level, ob, x, y);
     }
 
