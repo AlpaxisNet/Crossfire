@@ -106,6 +106,15 @@ public class CrossfireHost
     /// <summary>player.h <c>first_player</c> walk of object.c decrease_ob_nr: the object of the player whose open container is <paramref name="container"/>, or null.</summary>
     public virtual CfObject? FindPlayerWithContainer(CfObject container) => null;
 
+    /// <summary>
+    /// The <c>new_draw_info</c> and <c>new_draw_info_format</c> of the server (common/glue.c's function pointer, socket/info.c): a line
+    /// of text for the player <paramref name="who"/> (flags and colour are not passed: Graal Kingdoms' client colours the text itself).
+    /// This default shows nothing; the extension's host sends it to the player's script (docs/extension.md).
+    /// </summary>
+    public virtual void DrawInfo(CfObject who, string text)
+    {
+    }
+
     /// <summary>The <c>esrv_send_item</c> function pointer of common/glue.c (the client).</summary>
     public virtual void EsrvSendItem(CfObject player, CfObject op)
     {

@@ -75,7 +75,7 @@ public abstract class AccountTests
         Assert.Equal("999", sets.Single(e => e.Get("name")!.AsString == "clientr.mud_food").Get("value")!.AsString);
         Assert.Equal(Names(r, "client.set").Distinct().Count(), sets.Count);
         Assert.Equal(
-            new[] { "ac", "cha", "con", "dam", "dex", "exp", "food", "grace", "hp", "int", "level", "luck", "maxgrace", "maxhp", "maxsp", "pow", "sp", "speed", "str", "wc", "weight", "wis" }
+            new[] { "ac", "cha", "con", "dam", "dex", "exp", "food", "grace", "hp", "int", "level", "luck", "maxgrace", "maxhp", "maxsp", "pow", "sp", "speed", "str", "wc", "weight", "weight_lim", "wis" }
                 .Select(n => "clientr.mud_" + n),
             Names(r, "client.set").OrderBy(n => n, StringComparer.Ordinal));
         Val ev = Assert.Single(r.Events);

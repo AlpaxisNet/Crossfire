@@ -136,6 +136,12 @@ internal sealed class Player : IPlayerHandle
     /// <summary>The item strings the client holds and the marks for the next flush.</summary>
     public ShownTable Shown { get; }
 
+    /// <summary>The objects of the player's tree that have a tag as items: the sweep of the flush kills the tag of one that leaves the tree.</summary>
+    public HashSet<CfObject> Tracked { get; } = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>True when the tree of the player changed (an object entered, left or was freed): the next flush looks at the whole window.</summary>
+    public bool Reconcile { get; internal set; }
+
     /// <summary>True while the player is in the dispatcher's list of controllers to flush at the end of the request.</summary>
     public bool NeedsFlush { get; internal set; }
 

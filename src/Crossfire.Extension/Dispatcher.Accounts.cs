@@ -23,6 +23,7 @@ internal sealed partial class Dispatcher
         {
             // a second login without a logout: the same handle, and the player's strings are sent again
             SendClientStrings(held);
+            StartItems(held, again: true);
             return Outcome.Ok(Val.Handle(handles.HandleOf(held)));
         }
         PlayerState? player = OpenPlayer(account);
@@ -33,6 +34,7 @@ internal sealed partial class Dispatcher
         players[account] = player;
         AttachController(player);
         SendClientStrings(player);
+        StartItems(player, again: false);
         events.Add(Val.Map(
             ("name", Val.Str(Manifest.EventOnLoadedMudAccount)),
             ("target", Val.Str("player")),

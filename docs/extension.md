@@ -500,7 +500,7 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `muddamage` | 224 | int | rw | yes | `ob->stats.dam` | 5.5: 193 writes (every monster class sets it). Client string `clientr.mud_dam`. |
 | `mudattacktype` | 225 | int | rw | yes | `ob->attacktype` | 5.5: a bit mask |
 | `mudspeed` | 226 | float | rw | no | `ob->speed`, a float as written in the file | 5.5: float, read only in the help, but GK writes it (67 writes). Client string `clientr.mud_speed`. |
-| `mudweight` | 227 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. Client string `clientr.mud_weight`. |
+| `mudweight` | 227 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. No client string of its own. |
 | `mudcarrying` | 228 | int | r | no | `ob->carrying` | 5.5: the weight of the contents, read only |
 | `mudmagic` | 229 | int | rw | no | `ob->magic` | 5.5; not stable (enchanting is a rule of a later phase) |
 | `mudluck` | 230 | int | rw | yes | `ob->stats.luck` | 5.5. Client string `clientr.mud_luck`. |
@@ -546,6 +546,9 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `startequip` | 270 | bool | rw | yes | `FLAG_STARTEQUIP` | 4.7 table; 5.5 |
 | `ismudmonster` | 271 | bool | r | yes | `FLAG_MONSTER` | 4.7 table: read only |
 | `ismudobject` | 272 | bool | r | yes | always true | 5.5: "true for every mud object" |
+| `muditems` | 1000 | list:handle:TMudObject | r | no | the visible objects of `ob->inv`, in inventory order | mud-phase3.md 4.2: each element gets its tag when it is read; `get_list` gives rows of at most `limits.max_list` (1,024 on a 1.1 link), more is `too_large` and the host reads the member with `get` |
+| `mudmoney` | 1001 | int | r | no | `query_money` (shop.c) | mud-phase3.md 4.2: the coins of a player or a container, 0 for any other object |
+| `mudowner` | 1002 | ref | rw | no | extra line `mudowner` (an account), or an NPC in memory | mud-phase3.md 3 rule 5 and 4.2: **1.1 only** (a `ref`: not in the manifest of a 1.0 link). Read: the handle of the player while that account is online, else the account text, nil for none; written: a player's handle or a text (the account, saved with the object), an NPC's handle (kept in memory only), nil or "" clears it |
 
 **Methods of TMudObject**
 
@@ -581,7 +584,7 @@ last column.
 | `muddamage` | 512 | int | rw | no | `ob->stats.dam` | 5.5: 193 writes (every monster class sets it). Client string `clientr.mud_dam`. |
 | `mudattacktype` | 513 | int | rw | no | `ob->attacktype` | 5.5: a bit mask |
 | `mudspeed` | 514 | float | rw | no | `ob->speed`, a float as written in the file | 5.5: float, read only in the help, but GK writes it (67 writes). Client string `clientr.mud_speed`. |
-| `mudweight` | 515 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. Client string `clientr.mud_weight`. |
+| `mudweight` | 515 | int | r | no | `ob->weight` | 5.5: grams of one piece, read only. The client string `clientr.mud_weight` is the whole weight the player carries (his own weight and `carrying`), written by the flush of lane 4C, not this member. |
 | `mudcarrying` | 516 | int | r | no | `ob->carrying` | 5.5: the weight of the contents, read only |
 | `mudmagic` | 517 | int | rw | no | `ob->magic` | 5.5; not stable (enchanting is a rule of a later phase) |
 | `mudluck` | 518 | int | rw | no | `ob->stats.luck` | 5.5. Client string `clientr.mud_luck`. |
@@ -612,6 +615,10 @@ last column.
 | `wccap` | 543 | int | rw | no | extra line `mudwccap` | players.md 5.9 |
 | `accap` | 544 | int | rw | no | extra line `mudaccap` | players.md 5.9 |
 | `ismudobject` | 545 | bool | r | yes | always true | objects.md 5.5: true for a player with a loaded mud account |
+| `muditems` | 1500 | list:handle:TMudObject | r | no | the visible objects of the player's `ob->inv` | as on `TMudObject` |
+| `mudmoney` | 1501 | int | r | no | `query_money` over the player's tree | mud-phase3.md 4.2; GS1's `playermudmoney` reads it |
+| `markedobject` | 1502 | ref | rw | no | `contr->mark` (c_object.c `find_marked_object`) | mud-phase3.md 4.2: **1.1 only**. Read: the proxy of the marked item, "" when none (or when the item left the inventory: C clears the mark then); written: an item of the player's own top level marks it, nil or "" clears it, any other handle changes nothing |
+| `currentweapon` | 1503 | handle:TMudObject | r | no | `ob->current_weapon` | mud-phase3.md 4.2: the applied weapon when it is in the player's inventory, else nil (the same source as `getwieldedobject`) |
 
 ### Events
 
@@ -620,6 +627,7 @@ last column.
 | `onUpdateObject` | object | sync | after a `set` of a member of a level object (above); `args` empty |
 | `onMudDestroy` | object | sync | declared for the rules of phase 4; `object.destroyed` and `destroymudobject` do not fire it (objects.md F5, F7) |
 | `onLoadedMudAccount` | player | sync | at the `player.login` that loaded the player; `args` is `[the player's handle]` |
+| `onRPGMessage` | player | sync | **1.1 only** (lane 4C): a line of text for the player (C `new_draw_info`); `args` is `[text]` (param type `string`); the fallback is the `client.text` effect, which the host runs when the player's class has no `onRPGMessage` |
 
 The modes are the design's default (events sync). A handle in `args` becomes the NPC that shows it, or nil (protocol 5): for a player
 that is nil until the host passes the player object itself (a protocol gap, reported with this wave).

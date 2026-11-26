@@ -75,8 +75,8 @@ internal static partial class Manifest
             ("host", Val.Str("object")),
             ("members", Val.List(TMudArchMembers.Members.Select(Member))),
             ("methods", Val.List()))));
-        b.AddType(Lane.Core, new TypeDef(TMudObjectMembers.TypeId, TMudObjectMembers.TypeName, TMudObjectMembers.Table.ToManifest()));
-        b.AddType(Lane.Core, new TypeDef(TMudPlayerMembers.TypeId, TMudPlayerMembers.TypeName, TMudPlayerMembers.Table.ToManifest()));
+        b.AddType(Lane.Core, new TypeDef(TMudObjectMembers.TypeId, TMudObjectMembers.TypeName, TMudObjectMembers.Table.ToManifest(b.LinkMinor)));
+        b.AddType(Lane.Core, new TypeDef(TMudPlayerMembers.TypeId, TMudPlayerMembers.TypeName, TMudPlayerMembers.Table.ToManifest(b.LinkMinor)));
         b.AddEvent(Lane.Core, new EventDef(EventOnUpdateObject, "object"));
         b.AddEvent(Lane.Core, new EventDef(EventOnMudDestroy, "object"));
         b.AddEvent(Lane.Core, new EventDef(EventOnLoadedMudAccount, "player"));

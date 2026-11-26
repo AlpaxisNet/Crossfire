@@ -198,7 +198,12 @@ public sealed class SkeletonTests
 
         // Assert
         Assert.Equal(1L, hello.Get("proto_minor")!.AsInt);
-        Assert.True(Val.Same(Manifest.Build(), hello.Get("manifest")!));
+        // what a 1.1 manifest declares is what the lanes registered: lane 4C's player event and player class, and nothing else
+        Val manifest = hello.Get("manifest")!;
+        Assert.True(Val.Same(Manifest.Build(false, 1), manifest));
+        Assert.Equal(new[] { "onRPGMessage" }, manifest.Get("events")!.Items.Select(e => e.Get("name")!.AsString).Where(n => n.StartsWith("onRPG")));
+        Assert.Equal(new[] { "mudplayers" }, manifest.Get("player_classes")!.Items.Select(c => c.AsString));
+        Assert.DoesNotContain(manifest.Get("events")!.Items, e => e.Get("target")!.AsString == "item");
     }
 
     [Fact]
@@ -258,7 +263,9 @@ public sealed class SkeletonTests
         // Assert
         Assert.All(functions, id => Assert.True(Lane.Core.OwnsFunction(id)));
         Assert.All(types, id => Assert.True(Lane.Core.OwnsType(id)));
-        Assert.All(members, id => Assert.True(Lane.Core.OwnsMember(id)));
+        // the members of the lanes on the core's types are in the range of their own lane (docs/extension.md)
+        Assert.All(members, id => Assert.NotNull(Lane.OfMember(id)));
+        Assert.Contains((long)Lane.Items.FirstMember, members);
     }
 
     [Fact]
@@ -388,7 +395,7 @@ public sealed class SkeletonTests
         Assert.Equal(0u, first.Count);
         Assert.Null(first.Mark);
         Assert.Equal(0u, first.MarkCount);
-        Assert.Empty(first.Shown.Sent);
+        Assert.Equal(new[] { "clientr.mud_weight", "clientr.mud_weight_lim" }, first.Shown.Sent.Keys.OrderBy(k => k, StringComparer.Ordinal));
         Assert.False(first.Shown.HasMarks);
         Assert.False(first.NeedsFlush);
     }
@@ -442,7 +449,10 @@ public sealed class SkeletonTests
         using DirectExt ext = Start(ObjectWorld.Make(), 1, (d, ps) =>
         {
             calls.Add(ps.Account + ":" + string.Join(",", ps.Contr!.Shown.Dirty));
-            d.SetClientString(ps, "clientr.mud_item5", "flushed");
+            if (ps.Contr.Shown.HasMarks)
+            {
+                d.SetClientString(ps, "clientr.mud_item5", "flushed");
+            }
             ps.Contr.Shown.ClearMarks();
         });
         Login(ext, "bob");
@@ -492,6 +502,7 @@ public sealed class SkeletonTests
         int calls = 0;
         using DirectExt ext = Start(ObjectWorld.Make(), 1, (_, _) => calls++);
         Login(ext, "bob");
+        calls = 0; // the login asks for a flush of its own (lane 4C: all the strings)
 
         // Act
         CallOp(ext, TestLane.OpFast, "bob");
@@ -511,6 +522,7 @@ public sealed class SkeletonTests
             ps.Contr.Shown.ClearMarks();
         });
         Login(ext, "bob");
+        calls.Clear();
 
         // Act
         ReplyFrame failed = CallOp(ext, TestLane.OpMarkFail, "bob");
@@ -531,6 +543,7 @@ public sealed class SkeletonTests
         var calls = new List<string>();
         using DirectExt ext = Start(ObjectWorld.Make(), 1, (_, ps) => calls.Add(ps.Account));
         Login(ext, "bob");
+        calls.Clear();
         CallOp(ext, TestLane.OpMarkFail, "bob");
 
         // Act
@@ -545,7 +558,7 @@ public sealed class SkeletonTests
     {
         // Arrange
         var resend = new List<bool>();
-        bool first = true;
+        bool first = false;
         using DirectExt ext = Start(ObjectWorld.Make(), 1, (d, ps) =>
         {
             resend.Add(ps.Contr!.NeedsResend);
@@ -557,6 +570,8 @@ public sealed class SkeletonTests
             }
         }, maxFrame: 65_536);
         Login(ext, "bob");
+        first = true;
+        resend.Clear();
         Player contr = ext.Dispatcher.ControllerOf("bob")!;
         contr.Shown.MarkDirty(5);
 
