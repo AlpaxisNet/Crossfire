@@ -12,9 +12,11 @@ namespace Crossfire.Extension.Tests;
 internal sealed class ExternalLock : IDisposable
 {
     private readonly Process process;
+    private readonly string path;
 
     public ExternalLock(string path, int seconds)
     {
+        this.path = path;
         process = Process.Start(new ProcessStartInfo("flock", new[] { "-x", path, "sleep", seconds.ToString() })
         {
             RedirectStandardOutput = true,
@@ -54,6 +56,18 @@ internal sealed class ExternalLock : IDisposable
         }
         process.WaitForExit();
         process.Dispose();
+        // the lock is the kernel's: it is free only when every process that had the file open is gone (the flock tool's child ends a
+        // moment after its parent on a loaded machine), so the caller gets the file back only when this process sees it free
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < 10_000)
+        {
+            using DataLock? probe = DataLock.Acquire(path, TimeSpan.Zero);
+            if (probe != null)
+            {
+                return;
+            }
+            Thread.Sleep(20);
+        }
     }
 }
 

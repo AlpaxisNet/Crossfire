@@ -126,7 +126,10 @@ logged-in player. `stats` counts the tags given out (`tags`, dead ones included)
   that name, only when the level's name is a plain file name: no `/`, `\` or NUL, not `.` or `..`), else the level is unknown. A
   level that is saved takes precedence over the seed for good: a level whose saved file holds no objects stays empty. A file that
   exists and cannot be read (no permission, a folder in its place) is logged, the level stays unknown to every op, and the file is never
-  written over.
+  written over. A level that has neither file nor seed, when the host loads it (the first `level.load` of its name), is **held empty**
+  from then on (nothing is written for it until something is put in it), so that a player can drop an object in a field nothing was
+  ever made in; it is forgotten by `level.unload`. A level the host never announced (a group level) stays unknown, and a drop in it is
+  refused (wave 5 integration; docs/mud-phase3.md section 3 rule 8).
 - **Paging.** The objects that were not shown yet are the pages' list (`Level.Snapshot`); a page holds at most 64 `npc.place`
   effects and as many as fit in the frame; the cursor is the index of the next one (an int). A cursor that is not an int in
   `0..count` is `bad_args`; a cursor for a level that is not held, or that has no load running, gives `{more: false, cursor: nil}`.
@@ -283,7 +286,9 @@ that tells `Abc` from `abc` (Linux).
 
 `stats` returns a flat map of ints. The totals: `requests`, `errors`, `frames_in`, `frames_out`, `bytes_in`, `bytes_out` (frames
 including their 4-byte length; the HELLOs are not counted in `frames_in`), `pings`, `spin_hits`, `spin_misses`, `archetypes`, `tags`,
-`ticks`, `last_tick_ms`, `flushes`, `levels`, `level_objects` (the objects of the levels held), `players`. The GC: `gc_gen0`, `gc_gen1`, `gc_gen2` (collection counts of the process),
+`ticks`, `last_tick_ms`, `flushes`, `levels`, `level_objects` (the objects of the levels held), `players`, `examine_lines` (the lines of text
+that examine wrote, each one `onRPGMessage` event on a 1.1 link: counted apart from other events, so that the host's "events skipped" is
+not read as examine's). The GC: `gc_gen0`, `gc_gen1`, `gc_gen2` (collection counts of the process),
 `gc_pause_ns` (`GC.GetTotalPauseDuration`), `gc_allocated_bytes`. The writer: `writer_writes` (passes), `writer_files`,
 `writer_failures`, `writer_ns_total`, `writer_ns_max` (time of a pass). For each op that was called, with `<op>` one of
 `session_init`, `session_tick`, `session_flush`, `session_shutdown`, `get`, `set`, `get_many`, `get_list`, `invoke`, `stats`,
@@ -363,8 +368,25 @@ With Graal Kingdoms' own world, three tests (skipped without the variables) repo
 | `mudaddspecialobject` | 67 | `float`, `float`, `int`, `string`, `string` | `handle:TMudObject` | objects.md F2: the first word of the fourth argument is the archetype, the rest its `slaying`; the fifth its `msg`; the third its `value` |
 | `mudresetplayer` | 2000 | none | `void` | lane 4D (the start path, below): the player of the request's context starts again; the same as the method of `TMudPlayer` |
 | `mudrollstats` | 2001 | none | `void` | lane 4D: the player of the request's context rolls its stats again; the same as the method `rollstats` |
+| `mudaddinvobject` | 5000 | `int`, `string` | `bool` | lane 5B (the inventory functions, below): the player of the request's context gets that many objects of the archetype; slow |
+| `mudremoveinvobject` | 5001 | `int`, `string` | `bool` | lane 5B: that many objects of the archetype leave the player's top level, all or none; slow |
+| `mudcountinvobject` | 5002 | `string`, `bool` | `int` | lane 5B: the objects of an archetype the player holds, the sacks too with the flag |
+| `mudfindinvobject` | 5003 | `string` | `int` | lane 5B: the id of the best match of the player's top level (`find_best_object_match`), -1 when none |
+| `mudresetinvobject` | 5004 | `int` | `bool` | lane 5B: the item of that id goes back to what its archetype is; slow |
+| `mudorderinventory` | 5005 | `any` | `void` | lane 5B: the items of a list of ids come first in the inventory, in that order |
+| `findMudObject` | 5006 | `int` | `handle:TMudObject` | lane 5B: the item of that id in the player's tree (the sacks too), nil when none |
+| `mudhaveskill` | 5007 | `string` | `bool` | lane 5B: the player has a skill (type 43) of that name |
+| `mudskilllevel` | 5008 | `string` | `int` | lane 5B: the level of that skill, 0 when he has none |
+| `mudlistweapons` | 5009 | none | `void` | lane 5B, 1.1 only: writes `this.weapon<i>` of the calling NPC (`caller.setprop`) |
+| `mudlistskills` | 5010 | none | `void` | lane 5B, 1.1 only: `this.skill<i>` |
+| `mudlistspells` | 5011 | none | `void` | lane 5B, 1.1 only: `this.spellpaths` and the end marker `this.spell0` |
+| `mudlistequipment` | 5012 | none | `void` | lane 5B, 1.1 only: `this.equipment<i>` |
+| `mudaddmoney` | 6000 | `int` | `void` | lane 5C ("Money and examine", below; slow): the player of the request's context gets coins (n above 0) or pays (n below 0, with change; everything he has when it is less) |
+| `mudpay` | 6001 | `int` | `bool` | lane 5C (slow): the player of the context pays; false and no change when he has less; the method of `TMudPlayer` is the same |
+| `mudobjectattr` | 6002 | `string`, `string` | `string` | lane 5C: `("money", n)` is the text of an amount in coins; `(id or archetype name, attribute)` an attribute of an item of the context player or an archetype; "" for what is not there |
+| `mudexamineinvobject` | 6003 | `int` | `bool` | lane 5C: the player of the context examines the item of that id in his own tree; false when there is none |
 
-Three types: `TMudArch` (id 1, host `object`, no methods), whose members are all read-only (`access` "r") and **stable**: an
+Three types: `TMudArch` (id 1, host `object`, one method: `mudvalue`, 6750, lane 5C), whose members are all read-only (`access` "r") and **stable**: an
 archetype never changes; `TMudObject` (id 2, host `npc`) and `TMudPlayer` (id 3, host `player`), below. Three events (below), no
 tick, `limits.max_list` 256.
 
@@ -592,9 +614,15 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | --- | --- | --- | --- | --- |
 | `cloneMudObject` | 300 | `float`, `float` | `handle:TMudObject` | objects.md F6 (EVIDENCED, 8 calls): a copy at (x, y) of the same level with the mud state, not the script variables |
 | `destroymudobject` | 301 | none | `void` | objects.md F5 (EVIDENCED, 38 calls): the object leaves the level, `npc.remove`, no `onMudDestroy` |
+| `mudvalue` | 6000 | `int` | `int` | lane 5C ("Money and examine", below): `query_cost` of the stack; 0 is what a shop asks, 1 what it pays |
+| `mudidentify` | 6001 | none | `void` | lane 5C: `identify` of the object (slow: busy answers before it changes) |
+| `examine` | 6002 | none | `void` | lane 5C: the player of the request's context examines the object |
+| `mudexamineobject` | 6003 | none | `void` | lane 5C: the same as `examine` |
 
-Not here, because they need the rules of phases 3 and 4: `muddecreasequantity`, `mudvalue`, `getresistance`, `setresistance`, `apply`,
+Not here, because they need the rules of phases 3 and 4 (`muddecreasequantity` is lane 5B's, below): `mudvalue`, `getresistance`, `setresistance`, `apply`,
 `examine`, `mudidentify`, the attack methods; the members `mudowner`, `muditems`, `mudenvironment`, `mudmoney`, `datablock`,
+Not here, because they need the rules of phases 3 and 4: `muddecreasequantity`, `getresistance`, `setresistance`, `apply`,
+the attack methods; the members `mudowner`, `muditems`, `mudenvironment`, `mudmoney`, `datablock`,
 `dontmuddestroy` (a script flag), the resistances by name.
 
 #### Members of TMudPlayer
@@ -837,7 +865,7 @@ short name, the picture, the type, the quantity (`nrof`), the weight of the whol
 weight and `carrying`) and `clientr.mud_weight_lim` (`weight_limit[Str]`) follow in each flush; `clientr.mud_container` is
 `<id>,<name>,<picture>` of the container in `ob->container`, the empty text when it was closed. At most 3,800 items are shown (the request
 carries at most 4,096 effects); a log line says so once. The names are in `PlayerState.ClientOrder`, so `player.logout` deletes them.
-`ExtensionOptions.FlushHook`, a test's stand-in, replaces this flush.
+`ExtensionOptions.FlushHook`, a test's stand-in, replaces this flush. When the player's strings were sent at login, the flush ends with the strings of the stats and life (`RefreshClientStrings`: the 22 of players.md 3.2 and `mud_ac`, `mud_wc`, `mud_dam`, `mud_speed`): only those whose text changed are written, so a `fix_player` that changed the armour class or the speed shows at the end of the request.
 
 ### Lines of text
 
@@ -898,7 +926,7 @@ another one: Alpaxis's choice, so that choosing again does not give the first it
 (`type` 37); the player gets the experience objects it lacks (`init_player_exp`); `give_initial_items` makes the class's `randomitems`
 list into the tree with `GT_STARTEQUIP | GT_ONLY_GOOD`; `link_player_skills`; `fix_player`. `mudclass` becomes the name without the
 trailing `_class` (Alpaxis's choice: GK's own script copies `clientr.class`, which has no suffix, with `setmudclassnoaction`).
-The tags of what was freed die at once (`ReleaseItemTags`, `KillItem`) and the controller is told to look at the whole window (`Reconcile`), so that the flush of the same request deletes the strings of what left and sets those of what came. The stat bonuses of the class (`add_statbonus`) are wave 5D's.
+The tags of what was freed die at once (`ReleaseItemTags`, `KillItem`) and the controller is told to look at the whole window (`Reconcile`), so that the flush of the same request deletes the strings of what left and sets those of what came. `add_statbonus` and `remove_statbonus` are ported (`LivingChange`), but `setmudclass` does not call them: Graal Kingdoms' class is an object in the player's tree whose stats `fix_player` adds, not a player archetype (docs/extension.md, "The living core").
 
 **The accounts' file and the rolled values.** `orig_stats`, `levhp`, `levsp` and `levgrace` of `struct pl` are kept on the player's
 object as the lines `mudorigstats` (`Str Dex Con Wis Cha Int Pow`), `mudlevhp`, `mudlevsp` and `mudlevgrace` (the values of levels 1
@@ -915,6 +943,35 @@ account's file (neither by a save, a snapshot nor the logout) until the account 
 reads the file (a new player when there is none). The equipment hooks of a load are wave 7B's.
 
 **The manifest.** The builder lets a type of the core hold the members and methods of every lane, each in its own range.
+
+## The living core (lane 5D)
+
+`FixPlayer.Fix` is now the whole of living.c `fix_player` for a player whose stats were rolled (porting.md lists what is left out). Its
+results are on the object (`Stats.Ac`, `Wc`, `Dam`, `Luck`, `Speed`, `Resist[]`, `Attacktype`, the spell paths, `GlowRadius`, `Slaying`,
+`CurrentWeapon`, the flags the applied items give) and on the controller (`Player.Digestion`, `GenHp`, `GenSp`, `GenGrace`,
+`GenSpArmour`, `Encumbrance`, `WeaponSp`; `Braced` and `Searching` are inputs). The host answers `PlayerDigestion` and the other
+regeneration questions of `describe_monster` from them (`GkHost.Living.cs`). The strings `clientr.mud_ac`, `mud_wc`, `mud_dam` and
+`mud_speed` are the members `mudac`, `mudwc`, `muddamage` and `mudspeed` (same prefix as the 22 stats); the flush writes the ones whose
+text changed (above).
+
+**Entry points for wave 6** (all in the extension's `Gk` folder, none of them registered as a script function):
+
+| Name | C | What it does |
+| --- | --- | --- |
+| `FixPlayer.Fix(world, op)` | `fix_player(op)` | recomputes everything above from the applied items. `GkHost.FixPlayer` (the hook of every insert and remove) calls it |
+| `LivingChange.ChangeAbil(world, op, item)` | `change_abil(op, item)` | call it **after** `FLAG_APPLIED` of `item` is set (apply: flag 1) or cleared (take off: -1), and after `SkillTable.CheckSkillToApply`. It takes the attack types and paths of a removed item away, runs `Fix`, touches the controller (so the strings follow at the end of the request) and tells the player what changed through `Host.DrawInfo` (so the event `onRPGMessage`, or `client.text`); it returns 1 when anything changed. It does not call `esrv_update_item` for the item: `apply_special` does. A potion changes `Player.OrigStats` and the account's `mudorigstats` line |
+| `SkillTable.CheckSkillToApply(world, who, item)` | `check_skill_to_apply` | readies the skill of a weapon, bow, potion, scroll, rod, wand or horn and sets `Player.ShootType`; 1 on success, 0 otherwise (with "You can't use that!" and the flag cleared) |
+| `SkillTable.ChangeSkill(world, who, skill)` | `change_skill` | calls `SkillTable.ApplySpecial(who, item, AP_APPLY or AP_UNAPPLY)`, which **wave 6B sets** when it ports `apply_special` (return 0 for done, 1 for not done); until it is set a skill that is not the chosen one cannot be readied, and the log says so |
+| `LivingChange.AddStatbonus(op)`, `RemoveStatbonus(op)`, `AllowedClass(op)`, `ChangeAttr(stats, attr, value)` | `add_statbonus`, `remove_statbonus`, `allowed_class`, `change_attr_value` | the player archetype's stat bonus into the stats and the rolled stats (and out again) |
+
+`change_abil` is ported with its messages (without the colour flag `NDI_BLUE` of the resistance lines: `DrawInfo` has no colours). The
+one part left out is `check_walk_on` of a player that floats down (there are no squares).
+
+**Golden values.** The numbers of the tests of `fix_player` (`LivingTests.cs`) come from `tests/Crossfire.Extension.Tests/golden/living_golden.c`:
+the arithmetic of the C function with its declarations (float, int and double conversions as C has them), compiled with gcc on x86-64
+(SSE) and run for twelve scenarios (bare, weapon and mail, armour that limits the speed, overload, speed from `exp`, resistances with a
+potion effect, a player that cannot use armour, braced, an experience object of level 13, a disease, a weapon skill). The file's header
+says how to run it.
 
 ## Gmaps (wave 4, lane 4G; protocol 1.1 section 7.1)
 
@@ -953,3 +1010,176 @@ Crossfire has no gmaps: this is the extension's own rule (`Gk/Gmaps.cs`, `Dispat
     else is as the host said.
   - `LevelBlocked(level, x, y)` asks the one segment of the position (a position in no segment is blocked); `LevelLoadedAt(level, x, y)`
     the segment of the position (no segment: false); `LevelLoaded(name)` a segment or level name.
+
+## Pick up and drop (lane 5A of wave 5; docs/mud-phase3.md section 3)
+
+Objects move between a level and a player's tree. The ported C is `Gk/Pickup.cs` and `Gk/PickupDrop.cs` (server/c_object.c:
+`pick_up_object`, `pick_up`, `command_take`, `drop_object`, `drop`, `command_dropall`, `command_drop`, `sack_can_hold`); the level side
+and the entry points are `Dispatcher.Wave5A.cs`. Tested in `PickupTests.cs`.
+
+**The script's surface** (ids in the ranges of lane 5A):
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `muddropinvobject` | 4100 | `int`, `float`, `float`, `int` | `bool` | a slow function: `ctx.player` drops `n` (0: all) of the item of his own tree with that id (`FindItemById`, deep: also from a sack) at (x, y) of the request's level (`ctx.level`; on a gmap the segment of the position). False, and nothing changed, for an id that is no item of his tree, a negative `n`, an object with `no_drop`, or a place the extension does not hold ("You can't drop that here."); busy before anything changes |
+| `mudpickupobject` | 4000 | `int` | `bool` | a method of `TMudObject`: `ctx.player` picks up `n` (0 or more than the stack: all) of the object. On a ground object: false and no text for `nopick` and `unpaid` (docs/mud-phase3.md section 3, rule 6); "You can't pick up the X." for what C's `can_pick` refuses; "That item is too heavy for you to put it in your inventory." when it is too heavy. On the proxy of an item in a container of the player's own tree: it goes into the pack (or the open container). Any other proxy, or a level the extension does not hold: false |
+| `mudpickupobject2` | 4001 | `int` | `bool` | the same (GK's scripts call it from a `with` block on the item; the actor is `ctx.player` all the same) |
+
+(The function is the operation 4100; the two methods are the members 4000 and 4001 of `TMudObject`. Operations and members are numbered
+apart. The test lane of `PickupTests.cs` registers `t5acommand` as operation 4900.)
+
+**The rows of the table** (docs/mud-phase3.md section 3), with the effects of one reply in the order they have there:
+
+- *pick up whole*: `npc.remove` of the object, then (the flush) `client.set` of its string; its handle and tag stay: the level object
+  becomes the item's proxy (`AdoptLevelObject`), `muditems` lists the same handle;
+- *pick up and merge*: the same, and the level object's handle is dead (`bad_handle`); the stack keeps its own tag, its string is set;
+- *pick up part*: `GetSplitOb`; the level object keeps its tag and a smaller `nrof`, the level is saved, and the event `onUpdateObject`
+  (the manifest has it, target `object`) is sent for it; the new part has a new tag and a `client.set`;
+- *drop whole*: `client.del` of the string, then `npc.place` of the object as a level object with the **same handle** (the item's proxy
+  is the level object now; a script that held it still reads the object); the object's `mudowner` is the player's account;
+- *drop part*: `client.set` of the smaller stack, then `npc.place` of a new object with a new tag.
+
+A starting item (`startequip`) that is dropped is taken back by "the gods" (two lines, `client.del`, freed; the handle dies). The drop
+asks `Dispatcher.DropPlaceAt` for the place before it changes anything, and the move goes through `Dispatcher.SubmitMove` (a pick
+up: level first, account second; a drop: account first, level second; "Moves across files").
+
+**The commands** (for wave 7's `mudcommand` table; each answers `busy` before it changes anything, writes its lines with `DrawInfo`,
+and answers nil): `Dispatcher.CommandTake(PlayerState, string?)`, `CommandDrop(PlayerState, string?)` and
+`CommandDropAll(PlayerState, string?)` (null, `weapons`, `armor`, `armour` or `misc`). `drop` and `dropall` put the objects at the
+player's feet: they ask `player.pos` once (through `Dispatcher.PlayerPosition`, translated into the gmap's tiles for a script on a gmap,
+then `DropPlaceAt`); a failed query is the request's answer, nothing changed. `take` needs a position only when no container is open.
+
+**For the next waves.** `Dispatcher.PutObjectInSack` (`Func<op, sack, tmp, nrof, bool>`) is what `drop` calls while a container is
+open, and `Dispatcher.ApplySpecialUnapply` (`Func<op, tmp, int>`, zero for unapplied) what `drop_object` calls for an applied object;
+wave 6 sets both (until then nothing is dropped into a container and an applied object stays). `Pickup.SackCanHold` is the port of
+`sack_can_hold` for `put_object_in_sack`. A pick up into a container uses `Pickup.PickUp`'s search for an applied container.
+## The inventory functions (lane 5B)
+
+Docs/mud-phase3.md section 4.2 of the suite is the specification; the code is `Dispatcher.Wave5B.cs`, `Gk/Inventory.cs` (the C: the weight
+test of `pick_up_object`, `present_arch_in_ob`, the level of a skill's experience object), `Gk/Manifest.Wave5B.cs` (the functions above, ids
+5000 to 5012) and `Gk/TMudObjectMembers.Wave5B.cs` (the methods below); the tests are `InventoryTests.cs`.
+
+**Who the actor is.** A function acts on the player of the request's context; a method on its receiver. An id (a tag) a script gives is
+looked up in that player's own tree (`Dispatcher.FindItemById`): another player's item, an object of a level, a dead tag and 0 are
+unknown ids, which answer nil, false, 0 or -1 and change and show nothing. A request with no logged-in player in its context gets the answer
+of a miss (the lists write only their end marker). An account that is not loaded (`Loaded` false) is not changed. The calls with a
+wrong number or kind of arguments are `bad_args`.
+
+**Methods of `TMudPlayer`** (ids 5500 to 5508, `Gk/TMudObjectMembers.Wave5B.cs`): what changes a tree asks `CheckBusy()` first and answers
+`busy` before anything changes.
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `addinvobject` | 5500 | `int`, `string` | `handle:TMudObject` | `arch_to_object` through `NewItem` (identified), `nrof` = the count, the weight test of `pick_up_object` (his weight and what he carries plus the new weight against `weight_limit[Str]`), `insert_ob_in_ob` (it merges into a stack that `can_merge` accepts, which is the result). Nil, and the text "That item is too heavy for you to put it in your inventory." as `onRPGMessage`, when it is too heavy; nil for an unknown archetype, a count below 1 or above 100,000,000 |
+| `addinvobject2` | 5501 | `int`, `string` | `handle:TMudObject` | the same without the weight test (only a weight the object model cannot add up is refused) |
+| `removeinvobject` | 5502 | `int`, `string` | `bool` | the count of the archetype leaves the top level, taken from its stacks in the order of the inventory: all or nothing, false and no text when he has fewer or none; a stack that is taken whole is freed and its tag dies, a cut stack (`decrease_ob_nr`) writes its string again; an applied weapon that goes is no longer his current weapon, nor his mark |
+| `removeinvobjectbyid` | 5503 | `int`, `int` | `bool` | count, id: that item (the sacks too) loses that many, false when it has fewer |
+| `removeinvobjects` | 5504 | `string` | `int` | every stack of the archetype at the top level goes; the number of objects that went (0 for an unknown archetype) |
+| `findinvobject` | 5505 | `string`, `bool` | `handle:TMudObject` | `find_best_object_match` (`ItemMatching`) of the top level, and with the flag of the sacks too, the top level first; nil for a miss and for an empty text |
+| `findinvobjectbyid` | 5506 | `int`, `bool` | `handle:TMudObject` | `FindItemById`: the top level and the open container, with the flag all the sacks |
+| `findinvobjectbytitle` | 5507 | `string`, `bool` | `handle:TMudObject` | the first visible object whose `title` is the text (letters in any case), else the first whose "name title" is; with the flag the sacks too (Alpaxis's rule, differences.md) |
+| `countinvobject` | 5508 | `string`, `bool` | `int` | the sum of `nrof` (an object without `nrof` is one) of the objects made from the archetype; with the flag the sacks too |
+
+**Methods of `TMudObject`** (ids 5000 to 5004, for a container or a monster that holds objects; an item's proxy is the usual receiver):
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `findinvobject` | 5000 | `string`, `bool` | `handle:TMudObject` | as the player's, in the receiver's own inventory |
+| `findinvobjectbyid` | 5001 | `int`, `bool` | `handle:TMudObject` | the id is looked up in the request's player's tree, and the receiver must hold what is found (one level down, or any depth with the flag) |
+| `findinvobjectbytitle` | 5002 | `string`, `bool` | `handle:TMudObject` | as the player's |
+| `countinvobject` | 5003 | `string`, `bool` | `int` | as the player's |
+| `muddecreasequantity` | 5004 | `int` | `void` | `decrease_ob_nr` for n above 0 (the object is gone when n reaches its count: the tag dies and the string is deleted; in a player's tree the account is dirty), the stack grows by -n for n below 0 (its weight added to what holds it, the client told), 0 does nothing; on an object of a level the count changes, `onUpdateObject` is queued and the level is dirty, and at zero the object is destroyed with `npc.remove` |
+
+**The functions.** `mudremoveinvobject` and `mudaddinvobject` are the methods above for the request's player and answer true or false.
+`mudcountinvobject(text, deep)` and `mudfindinvobject(text)` (the id of the best match of the top level, -1 for a miss) are the same
+searches. `mudresetinvobject(id)` takes the item out of its holder, copies its archetype's clone over it (`copy_object`: every field,
+and the extra lines such as `mudowner` and `mudrealname` go), keeps its count, identified and applied state, and puts it back, where it
+may merge into an equal stack (its handle is then dead); a sack keeps its contents and the weight of them (`Carrying`, which the copy would
+reset to the archetype's); true, or false for an unknown id. `mudorderinventory(ids)` links the items
+named by a list of ids (top level of the player's own tree, once each, unknown ids skipped) at the head of the inventory in that order.
+`findMudObject(id)` is `findinvobjectbyid(id, true)` of the request's player. `mudhaveskill(name)` and `mudskilllevel(name)` look for the
+skill object (type 43) of that name in the top level of the player's tree (letters in any case); the level is that of the skill's
+experience object when it has one (C's `show_skills` says the skill object's own level is not always right), else its own `level`.
+`mudaddinvobject`, `mudremoveinvobject` and `mudresetinvobject` are `slow` in the manifest and answer `busy` before anything changes.
+
+**The lists of the quick menu** (`mudlistweapons`, `mudlistskills`, `mudlistspells`, `mudlistequipment`) write numbered strings into the
+script that called them with the effect `caller.setprop` (`this.weapon0`, `this.weapon1`, ... and then the empty `this.weapon<n>`, which the
+quick menu's loop stops at). They are in the manifest of a 1.1 link only: on a 1.0 link, which has no such effect, the functions do not exist
+and a call is `unknown_op`. An entry is `<name>,<icon>`: the name is `ItemStrings.DisplayName`, the same text as field [0] of the item string
+(a comma in a name is a semicolon in both), so that the Item-Menu's `equipweapon`, which compares field [0] with the name it was given,
+finds the item (a test pins that every weapon of a loaded account is listed under its field [0]); the icon is `mud_<face>.png`. Weapons are
+the visible objects of types 15, 14, 162 and 163; equipment the applied visible objects; skills the type-43 objects. `mudlistspells` writes
+`this.spellpaths` (the 20 names of `spellpathnames`) and no spell, as the port has no spell table.
+
+**Mutants tried against `InventoryTests.cs`** (each broken, a named test failed, restored): count 0 accepted, the weight test without
+`carrying`, `addinvobject2` testing the weight, no text when too heavy, a new object not identified, remove not all or nothing, a removed
+weapon staying current, a whole stack not freed, `removeinvobjectbyid` ignoring the stack size or not looking in sacks, an object without
+`nrof` counting 0, `countinvobject` always deep, the deep find without sacks, the title without "name title", a container that holds
+everything, the skill's own level instead of its experience object's, a case-sensitive skill name, bows not weapons, a comma left in
+field [0], no end marker, a relink without `Above`, a reset that loses the count or the applied state, an increase without weight, a
+level object that does not queue `onUpdateObject`, a method without `CheckBusy`, a function not `slow`, a miss of `mudfindinvobject`
+answering 0, lists on a 1.0 link, an order that takes items out of a sack (the test host crashes on the cyclic chain), a cut stack not
+through `decrease_ob_nr`, `removeinvobjects` stopping after one stack, a decrease to zero that keeps the object, `mudhaveskill` false,
+the spell paths one short, the equipment list not filtered. Not caught, and equivalent: leaving out `ps.Dirty = true` after an add (the
+object model's hooks mark the account dirty as well).
+
+## Money and examine (lane 5C of phase 3, wave 5)
+
+Money is the coins of a player's tree; examine is the text of C's `examine`. The code is `Gk/Money.cs`, `Gk/MoneyObjectAttr.cs`,
+`Gk/Examine.cs`, `Dispatcher.Wave5C.cs` and the manifest files `Gk/Manifest.Wave5C.cs`, `Gk/TMudObjectMembers.Wave5C.cs`;
+`MoneyTests.cs` and `ExamineTests.cs` test it (docs/mud-phase3.md sections 4.3 and 4.5).
+
+**Money** (ported: `Gk/Money.cs`, from server/shop.c `pay_for_amount`, `pay_from_container` and the coin loop of `sell_item`).
+
+- **`mudaddmoney(n)`**: *n* above 0 gives the coins of the sale loop: platinum first, then gold and silver; each kind first into the
+  applied containers whose race holds "gold" (up to their weight limit), then into the pack **with no weight test** (the 10,000
+  platinum coins of the start tasks). *n* below 0 takes `-n` the way `pay_for_amount` does, with change in coins; when the player has
+  less, everything he has in money goes and the call returns. Graal Kingdoms passes differences, so the sum is exact: a test sets
+  the money to a series of amounts with `mudaddmoney(amount - mudmoney)`. 0 and nil change nothing; a float is cut; a text is `bad_args`.
+- **`mudpay(n)`** (function of the context player, and method 6500 of `TMudPlayer`): `pay_for_amount`. The pack pays first with the
+  smallest coins first (silver, gold, platinum), the change comes back in smaller coins, and then each applied container whose
+  `race` is empty or holds "gold" (the same test as `query_money`, which `mudmoney` is). False and **no change at all** when the
+  player has less than the price; 0 is paid at once; a negative price is false. Coins that are no coin of the shop (a silver coin
+  whose value was changed) stay where they are and one error line is logged (C's `in pay_for_item: Did not find string match`); two
+  stacks of one coin are merged (C's "has two money entries" error is logged).
+- **`mudvalue(flag)`** (method 6000 of `TMudObject`, for an item of a player and for an object of a level; method 6750 of `TMudArch`):
+  `query_cost` of the stack for the charisma of the player of the request's context (none: no bargaining; the player's Cha and
+  bargaining skill otherwise, **so a player's price is 4 times the value times the bargain**, as in C). 0 is `F_BUY`, 1 is
+  `F_SELL`, any other flag is `bad_args`. The archetype's method prices one object made of it as a script would make it (identified,
+  `nrof` 1), so that a coin archetype is worth its value.
+- **Identified at creation** (docs/mud-phase3.md 4.3, question 11): every object a script or the engine makes comes from
+  `Dispatcher.NewItem`, which sets `FLAG_IDENTIFIED`; the coins of `mudaddmoney` and of change too. A potion made that way sells for its
+  value and is bought for its value; the same potion read from a file that does not say `identified 1` still sells for 1,000 each (at
+  most 600 for the stack) and is asked 50 times its value, as `query_cost` says. The coins that are made therefore do not merge with
+  a stack of the file that is not identified; the next payment merges them.
+- **`mudidentify()`** (method 6001 of `TMudObject`): `identify` (the flag, the name of a potion's archetype, `esrv_send_item`); the
+  account or level that holds the object is saved and the strings of the window are written again. It calls `CheckBusy()`.
+- **`mudobjectattr(a, b)`**: `("money", n)` (any case; *n* a number or its text, the fraction cut) is `cost_string_from_value`: "nothing",
+  "1 silver coin", "3 platinum coins and 1 gold coin". Otherwise *a* is the id of an item in the context player's own tree
+  (digits, or a number) or an archetype name, and *b* is `archname` (the archetype's name), `name` (`query_short_name`, what the
+  window shows), `icon`, `food`, `type`, `quantity` (`nrof`), `weight` (of one, in grams) or `value` (of one), each as text; "" for
+  an unknown attribute, an id that is not in the player's tree (another player's, a level object's, a dead one) and a name that is
+  no archetype. An archetype is read as one object made of it, so its name is the singular and its quantity is at least 1. These are
+  Alpaxis's choices where the scripts show no more than the names.
+- Errors that C logs with `LOG(llevError, ...)` in these calls (a coin that is not one, asking the buy price of an unidentified object)
+  are forwarded to the host's log, the first five of a request.
+
+**Examine** (ported: `Gk/Examine.cs`, from server/c_object.c `command_examine`, `examine`, `examine_monster`, `long_desc`).
+
+- **`mudexamineinvobject(id)`** (function): the item of that id in the player's own tree (the top level, the open container and the
+  sacks: `FindItemById` with `deep`); true when it was examined, false and no line otherwise (another player's id, a level object's,
+  a dead or unknown one). **`examine()`** and **`mudexamineobject()`** (methods of `TMudObject`, an item or an object of a level,
+  the monsters of a shop floor too): the same for that object; the player is the one of the request's context (none: `bad_args`).
+  None of the three changes anything, so they run while the extension is busy. `mudexamineinvobject2` and the trade scripts are
+  wave 7's.
+- **The lines** are C's: "That is " and `long_desc` (the name, and `describe_item` for the types that have one), what the type adds
+  (a spell book's level, "Something is written in it.", a container's race and weight limit in kg, a wand's charges when it is
+  identified), the materials (only when the object has no message), "It weighs 3.000 kg." / "They weigh ..." (`%3.3f`), the price
+  ("It would cost you ..." for an unpaid object, else "You would get ... for the it." with C's wording), `examine_monster`'s lines for a
+  monster, the object's message (not for exits, books, corpses and walk-on objects, and not a message that is just `@match`;
+  "The object has a story:" before it for an identified object that needs identifying), and a blank line (" "). An object that is
+  not identified shows no magic: that is `describe_item`. A line is one `DrawInfo` call: the player event `onRPGMessage` with the
+  `client.text` effect as its fallback (on a 1.0 link the effect alone), so an examine is up to a dozen events; they are counted in
+  `stats` as `examine_lines`.
+- `command_examine` is ported but no script calls it yet (`mudcommand`, wave 7); the ground of its parameterless form is the objects
+  below the player, of which this extension's player has none.

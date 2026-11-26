@@ -526,4 +526,153 @@ internal sealed class SkillTable
         }
         skillop.ExpObj = null;
     }
+
+    // ------------------------------------------------------------------ change_skill and check_skill_to_apply (wave 5D)
+
+    /// <summary>include/player.h <c>rangetype</c> <c>range_bow</c>.</summary>
+    public const int RangeBow = 1;
+
+    /// <summary>include/player.h <c>range_wand</c>.</summary>
+    public const int RangeWand = 3;
+
+    /// <summary>include/player.h <c>range_rod</c>.</summary>
+    public const int RangeRod = 4;
+
+    /// <summary>include/player.h <c>range_scroll</c>.</summary>
+    public const int RangeScroll = 5;
+
+    /// <summary>include/player.h <c>range_horn</c>.</summary>
+    public const int RangeHorn = 6;
+
+    /// <summary>include/player.h <c>range_skill</c>.</summary>
+    public const int RangeSkill = 7;
+
+    /// <summary>
+    /// <c>apply_special(who, item, flag)</c> of apply.c (<c>flag</c> is <c>AP_APPLY</c> 1 or <c>AP_UNAPPLY</c> 2): 0 when the item was
+    /// applied or taken off, 1 when it was not. Wave 6B sets it when it ports <c>apply_special</c>; until then (null)
+    /// <see cref="ChangeSkill"/> cannot apply a skill that is not already the chosen one and says it could not.
+    /// </summary>
+    public Func<CfObject, CfObject, int, int>? ApplySpecial { get; set; }
+
+    /// <summary>
+    /// skill_util.c <c>change_skill</c>: the player <paramref name="who"/> readies the skill number <paramref name="skIndex"/> (or, with
+    /// -1, none: the chosen skill is taken off). 1 when the skill is ready, else 0 (with the message "You have no knowledge of ..."
+    /// when the player has no such skill).
+    /// </summary>
+    public int ChangeSkill(CfWorld world, CfObject who, int skIndex)
+    {
+        if (who.ChosenSkill != null && who.ChosenSkill.Stats.Sp == skIndex)
+        {
+            // optimization for changing skill to current skill
+            if (who.Type == Define.PLAYER && who.Contr is Player current)
+            {
+                current.ShootType = RangeSkill;
+            }
+            return 1;
+        }
+        CfObject? tmp;
+        if (skIndex >= 0 && skIndex < Skills.Length && (tmp = CfWorld.FindSkill(who, skIndex)) != null)
+        {
+            if (Apply(world, who, tmp, 1) != 0)
+            {
+                world.Log(LogLevel.Error, "BUG: change_skill(): can't apply new skill\n");
+                return 0;
+            }
+            return 1;
+        }
+        if (who.ChosenSkill != null && Apply(world, who, who.ChosenSkill, 2) != 0)
+        {
+            world.Log(LogLevel.Error, "BUG: change_skill(): can't unapply old skill\n");
+        }
+        if (skIndex >= 0 && skIndex < Skills.Length)
+        {
+            world.Host.DrawInfo(who, "You have no knowledge of " + Skills[skIndex].Name + ".");
+        }
+        return 0;
+    }
+
+    private int Apply(CfWorld world, CfObject who, CfObject item, int flag)
+    {
+        if (ApplySpecial == null)
+        {
+            world.Log(LogLevel.Error, "apply_special is not available: the skill " + item.Name + " is not changed\n");
+            return 1;
+        }
+        return ApplySpecial(who, item, flag);
+    }
+
+    /// <summary>
+    /// skill_util.c <c>check_skill_to_apply</c>: when a player applies (or takes off) an item that needs a skill (a weapon, a bow, a
+    /// potion, scroll, rod, wand or horn), the skill is checked and made the player's chosen skill, and the shoot type is set. 1 when
+    /// the skill exists and could be readied; 0 for an item that needs none, when the item was taken off, and when the player
+    /// cannot use it (then "You can't use that!" and the item's <c>FLAG_APPLIED</c> is cleared). Always 1 for a monster. C's note: call it
+    /// after <c>FLAG_APPLIED</c> is set or cleared and before <see cref="LivingChange.ChangeAbil"/>.
+    /// </summary>
+    public int CheckSkillToApply(CfWorld world, CfObject who, CfObject item)
+    {
+        if (who.Type != Define.PLAYER)
+        {
+            return 1; // this function is only for players
+        }
+        int skill;
+        int shoottype;
+        // first figure out the required skill and the ending shoottype from the item
+        switch (item.Type)
+        {
+            case Define.WEAPON:
+                skill = Define.SK_MELEE_WEAPON;
+                shoottype = RangeSkill;
+                break;
+            case Define.BOW:
+                skill = Define.SK_MISSILE_WEAPON;
+                shoottype = RangeBow;
+                break;
+            case Define.POTION:
+            case Define.SCROLL:
+                skill = Define.SK_USE_MAGIC_ITEM; // not literacy!
+                shoottype = RangeScroll;
+                break;
+            case Define.ROD:
+                skill = Define.SK_USE_MAGIC_ITEM;
+                shoottype = RangeRod;
+                break;
+            case Define.WAND:
+                skill = Define.SK_USE_MAGIC_ITEM;
+                shoottype = RangeWand;
+                break;
+            case Define.HORN:
+                skill = Define.SK_USE_MAGIC_ITEM;
+                shoottype = RangeHorn;
+                break;
+            default:
+                world.Log(LogLevel.Debug, "Warning: bad call of check_skill_to_apply()\nNo skill exists for item: " + item.Name + "\n");
+                return 0;
+        }
+
+        // now alter the player's status appropriately
+        if (!item.QueryFlag(Define.FLAG_APPLIED))
+        {
+            // we are trying to unapply
+            if (who.ChosenSkill != null && who.ChosenSkill.Stats.Sp == skill)
+            {
+                ChangeSkill(world, who, -1);
+            }
+            return 0;
+        }
+        // we are trying to apply
+        if (who.ChosenSkill == null || who.ChosenSkill.Stats.Sp != skill)
+        {
+            if (ChangeSkill(world, who, skill) == 0)
+            {
+                world.Host.DrawInfo(who, "You can't use that!");
+                item.ClearFlag(Define.FLAG_APPLIED);
+                return 0;
+            }
+        }
+        if (who.Contr is Player pl)
+        {
+            pl.ShootType = shoottype;
+        }
+        return 1;
+    }
 }

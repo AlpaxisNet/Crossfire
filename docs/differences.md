@@ -213,10 +213,18 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
 
 ## The start path (`Crossfire.Extension/Gk`)
 
-- **`fix_player` is partly ported** (`FixPlayer.Fix`): the stats, the three life values and the weight limit. A player whose stats were
+- **`fix_player` is ported for players** (`FixPlayer.Fix`; wave 5D completed it). A monster is left as it is. `AT_PHYSICAL` (the bit mask 1)
+  indexes `prot[]` in the C code of a player that cannot use armour, so the magic resistance (index 1) is what the formula reads there:
+  kept as C has it. A player whose stats were
   never rolled (an account of this extension from before the start path) is left as its file has it: C always has `orig_stats` and
   the level arrays, the extension has them only after `roll_stats` (kept as the lines `mudorigstats`, `mudlevhp`, `mudlevsp` and
-  `mudlevgrace` of the account file).
+  `mudlevgrace` of the account file), and then its armour class, speed and resistances are left as they are too, not only the stats.
+- **`change_abil`** tells the player through `Host.DrawInfo` (no colour flag), leaves out `check_walk_on` of a player that floats down, and
+  keeps the changed rolled stats of a potion with the account (`StoreStats`). `change_skill` cannot apply a skill until wave 6B sets
+  `SkillTable.ApplySpecial`.
+- **The flush writes the strings of life and stats** (`mud_ac`, `mud_wc`, `mud_dam`, `mud_speed` and the others) when the text changed
+  and the player's strings were sent at login: Crossfire sends the whole status to the client at each `fix_player`; the extension
+  writes what changed.
 - **`give_initial_items` takes the list as an argument** and tests that: C tests `pl->randomitems` and uses `items`; here the player
   archetype has no `randomitems` and the class does.
 - **`init_player_exp`**: for a player that has some of the experience objects but not all, C's loop reads past its array and adds copies
@@ -231,3 +239,75 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
   section 4.7 gives its source). Alpaxis's choices: `mudclass` is the class name without `_class`; choosing a class again takes the
   first choice's items out; `mudresetplayer` clears `mudclass`; `loadmudaccount` with a suffix fails when the file is missing;
   `backupmudaccount` writes `backups/<file>.<UTC time>.txt`; the methods answer a bool where a script might test them.
+
+## Pick up and drop (`Crossfire.Extension/Gk/Pickup*.cs`; lane 5A of phase 3)
+
+- **An object on the ground is a level object.** The object model has no squares: C's `remove_ob` of an object on a map is the
+  extension's `npc.remove` and the removal from the level's list, and `insert_ob_in_map` of a dropped object is a new level object
+  with an `npc.place` (the same handle the item had; never merged with another object of the square; no script variables, no blob).
+  A level object is flagged `FLAG_REMOVED` all the time (the extension never inserts it in a map), so `pick_up_object` takes the branch
+  C has for an object that is removed already.
+- **`unpaid` is refused by the script functions** `mudpickupobject` and `mudpickupobject2` (false, no text), as `nopick` is: Alpaxis's
+  choice (docs/mud-phase3.md section 3, rule 6). C lets a player take an unpaid object and tells him what it will cost; `command_take`
+  (which Graal Kingdoms' command table does not have) keeps that.
+- **"That item is too heavy for you to put it in your inventory."** is the text for a pick up that is too heavy (docs/mud-phase3.md
+  section 4.2); C says "...to pick up.".
+- **`drop_object` with a number for an object that is no stack.** C's test `nrof && tmp->nrof != nrof` sends `muddropinvobject(id, x, y, 1)`
+  of a sword (`nrof` 0) to `get_split_ob`, which answers "There are only 1 swords."; a script that drops a count of one would never
+  drop a sword. A number equal to what the object has (`nrof`, or 1 for an object that is no stack) is the whole object here; a
+  larger number goes to `get_split_ob`, which says "There are only N <name>s." and changes nothing.
+- **A negative number** (the script's `n` of `mudpickupobject` or `muddropinvobject`) changes nothing and answers false; C's count is
+  unsigned.
+- **A drop on a level the extension does not hold** (a group or single-player level, a position in no segment of a gmap, a level that
+  has the most objects it may) answers false and "You can't drop that here." before anything changes (docs/mud-phase3.md section 3, rule 8).
+- **`mudowner`** of a dropped object is the dropping player's account (C has no such field: its `owner` would keep the object out of the
+  level file, docs/mud-phase3.md section 3, rule 5).
+- **An applied object is not dropped** until wave 6 sets `Dispatcher.ApplySpecialUnapply` (C calls `apply_special` to unapply it first);
+  a drop into an open container does nothing until `Dispatcher.PutObjectInSack` is set.
+- **The square of `command_take`** is the level's objects whose tile is the player's (the position from the query `player.pos`),
+  the one placed last first; C's chain `op->below`. An object that no `level.load` has shown to the host yet is not on the square.
+## The inventory functions (`Gk/Inventory.cs`, `Dispatcher.Wave5B.cs`; lane 5B of phase 3)
+
+Choices of Alpaxis where Graal Kingdoms' functions have no original in Crossfire (the names are in `docs/extension.md`, "The inventory
+functions").
+
+- **Field [0] of an item string has no comma.** A comma in a name (Graal Kingdoms has an archetype `Evil Master, Bonehead`, and scripts set
+  `mudrealname`) would shift the seven comma fields; `ItemStrings.DisplayName` writes it as a semicolon, in the item string and in the
+  names `mudlistweapons` and its kin write, which the Item-Menu compares.
+- **An object without `nrof` counts one** in `countinvobject`, `mudcountinvobject` and the removals (C's `pick_up_object` does the same:
+  `tmp_nrof`); the add sets `nrof` to the count, also for a count of 1.
+- **Remove is all or nothing**, from the stacks of the archetype at the top level in the order of the inventory; an absent item is false and
+  says nothing (the login hook asks for a flag that most players do not have).
+- **`findinvobjectbytitle`** (the original is not known): the first visible object whose `title` is the text, else the first whose
+  "name title" is, letters in any case.
+- **`mudskilllevel`** is the level of the skill's experience object (C's `show_skills` calls it the one that is always right), else the
+  skill's own level; `mudhaveskill` and it match the skill name in any case.
+- **The lists of the quick menu** write `<name>,<icon>` entries and an empty end marker with `caller.setprop`, in the order of the
+  inventory. What is a weapon (types 15, 14, 162, 163) and what is equipment (applied) is Alpaxis's reading: the original's lists are not
+  known. `mudlistspells` writes the spell paths and no spell, because the port has no spell table (a player's spells are numbers).
+- **`mudresetinvobject`** is `copy_object` of the archetype's clone over the item: the extra lines (`mudowner`, `mudrealname`) are gone;
+  count, identified and applied state are kept. `mudorderinventory` is a relinking of the inventory, saved with the account.
+## Money and examine in the extension (lane 5C of phase 3)
+
+- **Division by zero and missing archetypes.** `pay_for_amount` and the coin loop look up the three coin archetypes first and
+  refuse (false, an error line) when one is missing or has no value, where C would dereference a null pointer or divide by zero.
+  `examine_monster` writes no life line for a monster whose `maxhp + 1` is 0, where C stops with a division by zero.
+- **`pay_for_amount`** answers false for a negative amount (C's callers never ask for one) and its `FLAG_WAS_WIZ` lines, which name
+  a variable the function does not have, are left out.
+- **Kept from C so that nobody fixes it:** "You would get ... for the it." / "for the them." (the C format string); the `@match` test
+  of `examine` leaves out only a message that is exactly `@match` (`strncasecmp` with 7 compares the end of the pattern too); `pay_for_amount`
+  says true when a coin that is no coin of the shop (a changed value) was not taken apart and less was paid than was asked; a player's price is
+  4 times the value times the bargain by charisma (`query_cost`).
+- **Identified at creation.** Every object made for a script comes from `Dispatcher.NewItem`, identified, including the coins of
+  `mudaddmoney` and the change; the original network's choice is not known (docs/mud-phase3.md 4.3, question 11). An unidentified
+  stack of coins and an identified one do not merge on insert (C's `CAN_MERGE`), so a player may hold two stacks of one coin until
+  the next payment, which merges them as `pay_from_container` does.
+- **`mudvalue` of an archetype** prices one object made of it (identified, `nrof` 1); of an object, the stack as it is. A flag other
+  than 0 and 1 is refused (C has `F_TRUE`, which no script uses).
+- **`mudobjectattr`** is Alpaxis's: the scripts show the attribute names and the call forms only. `weight` and `value` are of one
+  piece, `name` is what the window shows, an archetype is read as one object made of it.
+- **`SpellLevel`** is a new member of `CrossfireHost` (like `SpellName`): the level of `spells[]`, 0 until the spell phase.
+- **A level that the host loaded is held, empty if it has no file and no seed** (wave 5 integration). The protocol says that a level the
+  extension knows nothing of gives no effects; the extension still takes the first `level.load` of a name as the host's announcement of
+  that level, so that `muddropinvobject` can place an object in a level where nothing has ever been made. Without it, the first drop in
+  every level that has no seed was refused ("You can't drop that here."). Nothing is written for such a level until it holds an object.

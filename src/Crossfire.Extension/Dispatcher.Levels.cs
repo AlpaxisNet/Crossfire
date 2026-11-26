@@ -192,6 +192,12 @@ internal sealed partial class Dispatcher
         if (cursor.IsNil)
         {
             level = GetOrReadLevel(name);
+            if (level == null && !refused.Contains("level:" + name) && FileNames.LevelFile(name) != null)
+            {
+                // the host loaded a level that has no saved file and no seed: it is a level of this extension from now on (empty,
+                // not written until something is put in it), so that a player can drop an object in it (docs/mud-phase3.md section 3 rule 8)
+                level = NewLevel(name);
+            }
             if (level == null)
             {
                 return none;

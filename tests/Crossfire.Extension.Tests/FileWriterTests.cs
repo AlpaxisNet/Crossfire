@@ -722,19 +722,20 @@ public class FileWriterTests
             },
         });
         writer.Submit("a.txt", Bytes("x"));
-        Assert.True(WaitFor(() => Volatile.Read(ref failures) >= 3)); // the tries are 0.2, 0.4 and 0.8 s apart: the next one is 0.8 s away
+        Assert.True(WaitFor(() => Volatile.Read(ref failures) >= 5, 20_000)); // the tries are 0.2, 0.4, 0.8 and 1.6 s apart: the next one is 3.2 s away
+        Thread.Sleep(300); // the writer records the failure of that pass just after the hook threw: a recovery before it would be recorded as a failure of the forced write
         Volatile.Write(ref broken, false);
 
         // Act
         bool ok = true;
         if (byWait)
         {
-            ok = writer.WaitWritten(TimeSpan.FromMilliseconds(500));
+            ok = writer.WaitWritten(TimeSpan.FromMilliseconds(2000)); // well inside the 3.2 s of the natural retry, however loaded the machine is
         }
         else
         {
             writer.Kick();
-            ok = WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")), 500);
+            ok = WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")), 2000);
         }
 
         // Assert

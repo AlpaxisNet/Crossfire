@@ -146,6 +146,12 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | common/living.c | `fix_player` | `CrossfireHost.FixPlayer` | not ported: the player's stats are a later wave; the extension's host answers the call by asking for a look at the player's window (docs/extension.md "Items of a player") |
 | common/living.c | `weight_limit[MAX_STAT + 1]` | `ItemMatching.WeightLimit`, `WeightLimitOf` | ported in the extension (the table of 31 values; a strength above `MAX_STAT` takes the last, a negative one, which C would index outside the table, the first) |
 | server/c_object.c | `find_best_object_match`, `find_marked_object`, `command_mark` | `ItemMatching.FindBestObjectMatch`, `FindMarkedObject`, `CommandMark` | ported in the extension (`Gk/ItemMatching.cs`; the lines C writes with `new_draw_info` go to `CrossfireHost.DrawInfo`) |
+| server/c_object.c | `sack_can_hold`, `pick_up_object`, `pick_up`, `command_take` | `Pickup.SackCanHold`, `PickUpObject`, `PickUp`, `CommandTake` | ported in the extension (`Gk/Pickup.cs`, lane 5A). Not ported: the `FLAG_WAS_WIZ` branches of `pick_up_object` (no object here is made by a wizard), `stop_item` and `fix_stopped_item` of `pick_up` (they act on arrows and thrown objects only) and its case of no object (C's `op->below`, a square the object model does not have: the caller always gives the object). The object on the ground is a level object: C's `remove_ob` of it is `Dispatcher.RemoveObFromMap` (`npc.remove`); see docs/differences.md "Pick up and drop" |
+| server/c_object.c | `drop_object`, `drop`, `command_dropall`, `command_drop` | `Pickup.DropObject`, `Drop`, `CommandDropAll`, `CommandDrop` | ported in the extension (`Gk/PickupDrop.cs`, lane 5A). C's `insert_ob_in_map` of the dropped object is `Dispatcher.InsertObInMap` (`npc.place`); not ported: the plugin event, `sell_item` on a shop floor (Graal Kingdoms' shops are scripts), the `SAVE_INTERVAL` save (config.h has it off) and the re-insertion of the player (he is no object of a map here). `apply_special` and `put_object_in_sack` are wave 6's: `Dispatcher.ApplySpecialUnapply` and `Dispatcher.PutObjectInSack` are where they plug in |
+| server/c_object.c | `pick_up_object` (the weight test only) | `Inventory.TooHeavy` | ported in the extension (`Gk/Inventory.cs`: his weight and what he carries plus the new weight against `weight_limit[Str]`; the rest of the function is lane 5A's) |
+| common/object.c | `present_arch_in_ob` | `Inventory.PresentArch` | ported for every stack of the archetype (`removeinvobject` takes from them in order) |
+| server/skill_util.c | `show_skills` (the level of a skill) | `Inventory.SkillLevel` | the level of the experience object, as that function's comment says |
+| server/c_object.c | `command_examine`, `examine`, `examine_monster`, `long_desc` | `Examine.CommandExamine`, `ExamineObject`, `ExamineMonster`, `LongDesc` | ported in the extension (`Gk/Examine.cs`); every `new_draw_info` is `CrossfireHost.DrawInfo`; `LOOK_OBJ` is written out; `inventory`, `draw_find` and the rest of c_object.c are not ported |
 | socket/item.c | `MarkItem` | `ItemMatching.MarkItem` | ported with the object already found (the client's tag is looked up by the caller, in the player's own tree) |
 | server/player.c | `fix_weight` | `ItemMatching.FixWeight`, `Dispatcher.FixWeight` | ported in the extension: for the players it is given; the extension calls it for a player at login (C calls it from its tick) |
 | socket/item.c | `query_flags` | `ItemStrings.QueryFlags` | ported in the extension (`Gk/ItemStrings.cs`); `ItemStrings.Flags` adds Graal Kingdoms' types 162 to 166 and `F_NOPICK` (docs/differences.md) |
@@ -176,9 +182,12 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | --- | --- | --- |
 | player.c `roll_stat`, `roll_stats` | `Start.RollStat`, `Start.RollStats` | ported (with `USE_SWAP_STATS` and `SORT_ROLLED_STATS` of config.h; the stats are in `Player.OrigStats`; `add_exp(op, 0)` is `LivingRules.AddExpNone`) |
 | player.c `give_initial_items` | `Start.GiveInitialItems` | ported (`start_spells` and `start_prayers` as the numbers of `enum spellnrs`; `pl->randomitems != NULL` is a test of the list that is passed; `known_spells` is `Player.KnownSpells`) |
-| player.c `key_change_class` | `Dispatcher.SetMudClass` (private) | the order of its `d` branch (`init_player_exp`, `give_initial_items`, `link_player_skills`) with the class object put into the tree; the stat bonus part is wave 5D's |
+| player.c `key_change_class` | `Dispatcher.SetMudClass` (private) | the order of its `d` branch (`init_player_exp`, `give_initial_items`, `link_player_skills`) with the class object put into the tree; the stat bonus part (`add_statbonus`) is ported as `LivingChange.AddStatbonus` but not called: GK's class is an object whose stats `fix_player` adds |
 | player.c `get_player`, `check_login`, `save_player`, `Roll_Again`, `Swap_Stat`, `remove_unpaid_objects`, the rest | none | not ported: the client's dialogue, the login of Crossfire's players (the extension reads the account its own way) |
-| living.c `fix_player` | `FixPlayer.Fix` (called by `GkHost.FixPlayer`) | PARTLY: the stats from `orig_stats` and the applied items' stat bonuses, `check_stat_bounds`, `maxhp`, `maxsp`, `maxgrace` from the levels, and the weight limit (`weight_limit[Str]`, which c_object.c uses). Wave 5D: resistances, ac, wc, damage, speed, light, the flags and the regeneration |
+| living.c `fix_player` | `FixPlayer.Fix` (called by `GkHost.FixPlayer`) | ported for players (wave 4D: the stats, the life values, the weight limit; wave 5D: the resistances, ac, wc, damage, speed, `weapon_sp`, light, flags, regeneration, digestion, `SPELL_ENCUMBRANCE` and `SEARCH_ITEMS` as `Player.Encumbrance` and `Searching`). Not ported: the part for monsters (a monster is left as it is), `PLUGINS` (`current_weapon_script`) |
+| living.c `change_abil`, `change_attr_value`, `add_statbonus`, `remove_statbonus`, `allowed_class` | `LivingChange.*` | ported; `check_walk_on` of a floating-down player is left out (no squares); the messages go through `Host.DrawInfo` without `NDI_BLUE` |
+| living.c `dex_bonus`, `speed_bonus`, `dam_bonus`, `thaco_bonus`, `max_carry`, `gain_msg`, `lose_msg` | `LivingTables.*` | ported |
+| skill_util.c `change_skill`, `check_skill_to_apply` | `SkillTable.ChangeSkill`, `SkillTable.CheckSkillToApply` | ported; `apply_special` is a delegate (`SkillTable.ApplySpecial`) that wave 6B sets |
 | living.c `check_stat_bounds`, `level_exp`, `player_lvl_adj`, `con_bonus`, `sp_bonus`, `grace_bonus`, `levels` | `LivingRules.*` | ported (`settings.simple_exp` is off; `player_lvl_adj` leaves out the dragon's gifts and the "You are now level" messages) |
 | living.c `add_exp` | `LivingRules.AddExpNone` | the branch for 0 experience only |
 | utils.c `die_roll` | `LivingRules.DieRoll` | ported |
@@ -218,7 +227,9 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | `cost_string_from_value` | `CfWorld.CostStringFromValue` | ported (returns the text; no static buffer) |
 | `query_cost_string` | `CfWorld.QueryCostString` | ported |
 | `query_money` | `CfWorld.QueryMoney` | ported |
-| `pay_for_amount`, `pay_for_item`, `pay_from_container`, `get_payment2`, `get_payment`, `sell_item` | none | not ported: they take coins out of inventories and send the changes to the client of Crossfire (`esrv_del_item`, `fix_player`, `draw_info`, the shop map squares); the price they use is `QueryCost` |
+| `pay_for_amount`, `pay_from_container` | `Money.PayForAmount`, `Money.PayFromContainer` | ported in the extension (`Gk/Money.cs`); the client calls are `CrossfireHost`'s hooks; the `FLAG_WAS_WIZ` lines (they name a variable the function does not have) are left out; the coin archetypes are looked up first (C would stop on a missing one) |
+| `sell_item` | `Money.AddCoins` | its coin loop (lines 538 to 570) is ported in the extension; the texts ("You receive ...", "We're not interested in ...") and `identify` are not: a script says them |
+| `pay_for_item`, `get_payment2`, `get_payment` | none | not ported: they pay for the unpaid objects of a shop (the shop floor is Graal Kingdoms' scripts' own) |
 | `shop_sort`, `add_shop_item`, `shop_listing` | none | not ported: the listing of the shop's map squares to a player |
 
 ### What the two files above call (other files)
@@ -233,7 +244,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | common/player.c | `find_skill`, `atnr_is_dragon_enabled`, `is_dragon_pl` | `CfWorld.FindSkill`, `AtnrIsDragonEnabled`, `IsDragonPl` | ported |
 | common/porting.c | `isqrt` | `CfWorld.Isqrt` | ported (64-bit sum, see differences) |
 | (C runtime) | `%+d`, `%.Nf` | `CStr.Plus`, `CStr.FormatFixed` | not ported from a Crossfire file; the behaviour of `printf` that item.c relies on |
-| include/spells.h | `spells[]` (`name`, `charges`) | `CrossfireHost.SpellName`, `SpellCharges` | not ported: the spell table is a later phase |
+| include/spells.h | `spells[]` (`name`, `charges`, `level`) | `CrossfireHost.SpellName`, `SpellCharges`, `SpellLevel` | not ported: the spell table is a later phase |
 | include/player.h | `struct pl` (`digestion`, `gen_*`) | `CrossfireHost.PlayerDigestion` .. | not ported: the player is the next phase |
 
 ## How to read the table
