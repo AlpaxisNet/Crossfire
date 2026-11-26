@@ -25,6 +25,36 @@ not the start of a message (C needs `msg` alone on its line), so its text lines 
 key spelled as the loader has no rule for it (`resist_blindness`, `resist_life_stealing` in this version, `berserk`) is unknown;
 `flag` and the others above are simply not Crossfire keys.
 
+## Map files (common/map.c) and the player archetype
+
+- **The port holds no maps.** `load_objects` hands each object to `CrossfireHost.InsertObInMap` and `get_map_ob` is the host's; the
+  squares are not kept (`link_multipart_objects`, which walks them, is not ported); `save_objects` takes the squares as lists the host
+  supplies. The header is `MapHeader`, read by `load_map_header` and written by the header part of `new_save_map`; opening and
+  naming the file, compression and the file of unique items are the host's.
+- **The tile paths** of a header are kept as written: C runs `check_path` and, when the file is not there, tries the path relative to
+  the map's own, which needs the file system.
+- **`get_player_archetype`** returns null and logs "No Player achetypes" where C calls `exit(-1)`; C also loops for ever when it is
+  called with NULL and there is no player archetype, which the port does not.
+- **`load_map_header` and the message**: C copies `msgbuf` even when it holds garbage; the port keeps a message only when it read one
+  (the empty message of C is not kept either).
+
+## Graal Kingdoms' map files (the extension, not the port)
+
+Graal Kingdoms' `mudlevels` files are Crossfire's map format with these differences, all kept by the extension's reader and writer
+(`LevelFiles`) and not by the port:
+
+- **Positions are floats** (`x 3.328125`): Crossfire's `x` and `y` are integers and its rules read them with `atoi`. The extension
+  turns the top block's `x` and `y` into `mudx` and `mudy` before the port reads the block and keeps the numbers as doubles; what the
+  integer fields of the object hold is the archetype's, and a saved file writes the floats.
+- **`flag name=value` lines** are the object's script variables (Graal Kingdoms' loader had a rule for the key `flag`); the extension
+  keeps them with the object until the host gives its own state, then writes that as `mudblob`.
+- **A float is written as C writes it** (`%f`, 6 decimals): `speed_left -0.100000023` comes back as `-0.100000`.
+- **Inventory order.** `insert_ob_in_ob` puts an object read at the head of the inventory and `save_object` writes the inventory from
+  the head, so C reverses an inventory at every save and load. The extension reverses it once after each load (`Inventories.RestoreFileOrder`)
+  so that a round trip keeps the order of the file.
+- **Merging.** `insert_ob_in_ob` merges what can merge (`CAN_MERGE`): two identical nested objects of a seed become one with a larger
+  `nrof`, as in C.
+
 ## Language and runtime
 
 - **Strings.** The C code shares strings through `common/shstr.c` (`add_string`, `free_string`, `add_refcount`) and compares them by
