@@ -103,8 +103,16 @@ internal static class ApplyWorld
                 exp.Level = (short)a[2].AsInt;
                 return Outcome.Ok(Val.Bool(d.Applies.CheckWeaponPower(pl, (int)a[3].AsInt)));
             }
-            case "powernoexp": // the same for a player who has no wc experience object: his own level counts
+            case "powernoexp": // the same for a player who has no wc experience object: his own level counts (the login gave him the objects: they are taken away)
             {
+                for (CfObject? c = pl.Inv, next; c != null; c = next)
+                {
+                    next = c.Below;
+                    if (c.Type == Define.EXPERIENCE)
+                    {
+                        w.RemoveOb(c);
+                    }
+                }
                 pl.Level = (short)a[2].AsInt;
                 return Outcome.Ok(Val.Bool(d.Applies.CheckWeaponPower(pl, (int)a[3].AsInt)));
             }
