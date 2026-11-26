@@ -1272,6 +1272,19 @@ public sealed class ItemTests
     }
 
     [Fact]
+    public void MarkedObject_Given_the_manifest_of_a_1_1_link_When_read_Then_the_member_has_the_type_ref_of_TMudObject_so_that_the_host_gives_the_script_the_proxy_of_the_item()
+    {
+        // Arrange (found by the end-to-end test of wave 7: the host's bare "ref" has no proxy type and gave a script nil for the item that C's find_marked_object found)
+        Val v11 = Manifest.Build(false, 1);
+
+        // Act
+        Val member = v11.Get("types")!.Items.SelectMany(t => t.Get("members")!.Items).Single(m => m.Get("name")!.AsString == "markedobject");
+
+        // Assert
+        Assert.Equal("ref:TMudObject", member.Get("type")!.AsString);
+    }
+
+    [Fact]
     public void Members_Given_a_1_0_link_When_the_manifest_is_built_Then_the_ref_members_are_left_out_and_the_others_stay()
     {
         // Arrange

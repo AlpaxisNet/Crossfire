@@ -118,7 +118,7 @@ internal static partial class TMudPlayerMembers
             (env, p) => TMudObjectMembers.HandlesOf(env, TMudObjectMembers.VisibleInventory(p.Ob)), null,
             items: (_, p) => TMudObjectMembers.VisibleInventory(p.Ob));
         b.Add("mudmoney", "int", false, false, (env, p) => Val.Int(TMudObjectMembers.MoneyOf(env, p.Ob)), null);
-        b.Add("markedobject", "ref", true, false, (env, p) => MarkedValue(env, p), SetMarked, minMinor: 1);
+        b.Add("markedobject", "ref:" + TMudObjectMembers.TypeName, true, false, (env, p) => MarkedValue(env, p), SetMarked, minMinor: 1);
         b.Add("currentweapon", "handle:" + TMudObjectMembers.TypeName, false, false,
             (env, p) => WieldedObject(p.Ob) is { } w ? Val.Handle(env.ItemHandleOf(w)) : Val.Nil, null);
     }

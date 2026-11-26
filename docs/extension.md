@@ -674,14 +674,14 @@ last column.
 | `mudclass` | 538 | string | rw | no | extra line `mudclass` | players.md 5.9, 5.13: the class's name as text; set by `setmudclass` (phase 3) |
 | `peaceful` | 539 | bool | rw | no | extra line `mudpeaceful` | objects.md 5.4 (TMudPlayer members), players.md 5.6 |
 | `lastdeath` | 540 | int | rw | no | extra line `mudlastdeath` (0 when absent) | objects.md 5.4: a timestamp GK writes |
-| `mudverbose` | 541 | bool | rw | no | extra line `mudverbose` | players.md 5.13: 16 reads |
+| `mudverbose` | 541 | int | rw | no | extra line `mudverbose` (a number from -128 to 127: C's `char`) | players.md 5.13: 16 reads; set by the command `verbose` (wave 7: it was a bool in wave 3) |
 | `levelcap` | 542 | int | rw | no | extra line `mudlevelcap` | players.md 5.9: GK writes it for trial accounts |
 | `wccap` | 543 | int | rw | no | extra line `mudwccap` | players.md 5.9 |
 | `accap` | 544 | int | rw | no | extra line `mudaccap` | players.md 5.9 |
 | `ismudobject` | 545 | bool | r | yes | always true | objects.md 5.5: true for a player with a loaded mud account |
 | `muditems` | 1500 | list:handle:TMudObject | r | no | the visible objects of the player's `ob->inv` | as on `TMudObject` |
 | `mudmoney` | 1501 | int | r | no | `query_money` over the player's tree | mud-phase3.md 4.2; GS1's `playermudmoney` reads it |
-| `markedobject` | 1502 | ref | rw | no | `contr->mark` (c_object.c `find_marked_object`) | mud-phase3.md 4.2: **1.1 only**. Read: the proxy of the marked item, "" when none (or when the item left the inventory: C clears the mark then); written: an item of the player's own top level marks it, nil or "" clears it, any other handle changes nothing |
+| `markedobject` | 1502 | ref:TMudObject | rw | no | `contr->mark` (c_object.c `find_marked_object`) | mud-phase3.md 4.2: **1.1 only**. Read: the proxy of the marked item (the type is `ref:TMudObject`: the host turns a bare `ref` into nil for an item, and a script reading the mark got 0), "" when none (or when the item left the inventory: C clears the mark then); written: an item of the player's own top level marks it, nil or "" clears it, any other handle changes nothing |
 | `currentweapon` | 1503 | handle:TMudObject | r | no | `ob->current_weapon` | mud-phase3.md 4.2: the applied weapon when it is in the player's inventory, else nil (the same source as `getwieldedobject`) |
 
 ### Events
@@ -932,7 +932,7 @@ take the player of the request's context (a script that runs for the player call
 | `loadmudaccount` | 2504 | `string` | `bool` | the empty suffix does nothing while the account is loaded; otherwise reads the file again (below) |
 | `unloadmudaccount` | 2505 | none | `void` | drops the memory state without saving |
 | `savemudaccount` | 2506 | none | `void` | writes the file now |
-| `backupmudaccount` | 2507 | none | `void` | writes the file and a copy `backups/<file>.<UTC yyyyMMdd-HHmmss>.txt` |
+| `backupmudaccount` | 2507 | `string` | `void` | writes the file and a copy `backups/<file><name>.<UTC yyyyMMdd-HHmmss>.txt` (the name is a suffix; none is the empty one; wave 7B) |
 | `Mud_LoadAccount` | 2508 | `string` | `bool` | `loadmudaccount("_" + slot)` |
 
 `mudresetplayer`, `setmudclass`, `loadmudaccount` and `unloadmudaccount` call `CheckBusy()` first (they change items): while
@@ -958,7 +958,7 @@ with its handles, the strings of the old player are deleted, the new tree is mar
 at the flush), the strings of the stats are set again and `onLoadedMudAccount` fires. The account is then saved to the file that was
 read (`PlayerState.FileKey`). After `unloadmudaccount` the player is a blank one of the player archetype, nothing is written to the
 account's file (neither by a save, a snapshot nor the logout) until the account is loaded again, and a load with the empty suffix
-reads the file (a new player when there is none). The equipment hooks of a load are wave 7B's.
+reads the file (a new player when there is none). A load of a file runs what C's login runs after it reads a file and sends the equipment hooks ("The account completion", below).
 
 **The manifest.** The builder lets a type of the core hold the members and methods of every lane, each in its own range.
 
@@ -1094,8 +1094,9 @@ closing change the account file (the applied flag). `Dispatcher.ApplyByLane` is 
 **A container on the ground** is the level object of a level the extension holds (its `CfObject` has no environment; a level object is
 flagged removed all the time). It is opened by the apply of the object (the face's `onApply` and `defaultApply`): `op->container` is
 the object, `WALK_OFF` and `FLY_OFF` are set (and cleared when it is closed), the level is marked to be saved, and the window shows its
-objects with the 1 in field 6. Nothing closes it when the player walks away (C's walk off is not ported: the square is the host's), so
-it stays open until he closes it, logs out or opens another. The id `mud_container` names is the tag of the object's item proxy
+objects with the 1 in field 6. Nothing closes it when the player walks away, and C does not either (`remove_ob` clears `container` only when the object itself
+leaves the square, `pick_up` and `drop` use the open container wherever it is); C's walk off is not ported (the square is the host's), so
+it stays open until he closes it, logs out or opens another, or another player picks it up ("Commands", below). The id `mud_container` names is the tag of the object's item proxy
 (`ItemProxy`), which `mudmoveinvobject` accepts as `to`; it is no id for `findinvobjectbyid`, which finds only objects of his tree
 (and not the ground container itself). The ground container is never an item of the window: `esrv_update_item` for it does nothing
 (the extension would take it for one of his items and kill its tag at the next flush).
@@ -1144,7 +1145,7 @@ container as a level face calls `defaultApply` on the face, which reaches `Apply
 **Fix lane of wave 6, containers.** A container on the ground that goes away while a player has it open is closed first, as
 `esrv_apply_container` closes it (the player is told "You close ..."): `level.unload` and the destruction of the object by a script
 do it (`Dispatcher.CloseOpenOn`), so that `Player.Container` never names a freed object and a drop never puts his things into it. Walking
-away from an open ground container is still not ported (docs/differences.md, "Containers"). Whatever leaves a container that lies on the
+away from an open ground container closes nothing, as in C (docs/differences.md, "Containers"). Whatever leaves a container that lies on the
 ground (`pick_up_object` of an object in it, `take` and `esrv_move_object` alike) sets `Pickup.From` to that level, so the level's
 file is written first and the account's second.
 
@@ -1366,3 +1367,106 @@ dirty.
 | `LIGHTER` (a player) | the marked object is the one to light: "You need to mark a lightable object."; a lighter with charges (`last_eat` and `stats.food`) loses one (one lighter of a stack is split off); "You attempt to light the X with a used up Y."; the object's saving throw against fire: "You light the X with the Y." (a glowing object becomes its `other_arch`, any other loses a random part and a `burnout` comes) or "... and fail." | 1; 0 for a monster |
 | `TREASURE` (a player) | a chest with contents puts each at the player's feet ("You find X in the chest."), then the empty chest goes; "The chest was empty." for an empty one (it goes too). A chest nobody filled is filled first (docs/differences.md). "You can't drop that here." and no change when there is no level at his feet | 1; 0 for a monster |
 | 160, 161 | "You can't apply that." | 1 |
+
+## Commands (lane 7A of wave 7; docs/mud-phase3.md section 4.6)
+
+The ported C is `Gk/Command.cs` (server/c_misc.c: `command_title`, `command_peaceful`, `command_brace`, `command_fix_me`,
+`command_listen`, `command_who`, `onoff_value`; server/c_chat.c: `command_tell`) and `Gk/HelpCommand.cs` (`command_help`, `help_topics`,
+`show_commands`); the table and the glue are `Dispatcher.Wave7A.cs`; the tests are `CommandTests.cs` and `ContainerCommandTests.cs`.
+What differs from C is in docs/differences.md, "Commands".
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `mudcommand` | 12000 | `string`, `string` | `void` | a slow function: `ctx.player` runs the command `cmd` with the text `params`; busy before anything changes |
+
+**`mudcommand(cmd, params)`**: `ctx.player` runs the command. The word (lower case)
+and the text are cut as C's `parse_string` cuts them (an empty text is none); every line the command says is `DrawInfo` (the event
+`onRPGMessage` with its fallback on a 1.1 link, a `client.text` effect on a 1.0 link); the answer is nil, also for a word that is no
+command ("Unknown command.  Try help."). A call with no logged-in player answers nil and logs. The function is slow, so the
+dispatcher answers `busy` before any command runs while the worker saves or recovers.
+
+| Command | What it is |
+| --- | --- |
+| `drop`, `dropall`, `take` (`get`) | lane 5A's `Dispatcher.CommandDrop`, `CommandDropAll`, `CommandTake`: into the open container when one is open (no position asked; the write order of "Moves across files": account then level for a drop into a container on the ground, level then account for a take out of it), else at the player's feet (`player.pos`) |
+| `mark [id or text]` | `command_mark`; a text of digits only is the `mudid` of an item of the top level (`#s(item)` of the Item-Menu). `markedobject` reads the item marked |
+| `save` | the account is written now ("You have been saved."); "SAVE FAILED!" for an unloaded account |
+| `title`, `peaceful`, `brace [on/off]`, `fix_me`, `fixme`, `verbose [n]`, `who`, `tell name text` | C's handlers |
+| `help [topic]`, `help topics`, `help commands` | C's `command_help` with `lib/def_help` and `lib/help/*` (26 topics) embedded in the extension (`Data/`) |
+| `useskill`, `readyskill`, `party`, `blood`, `search`, `cast`, `invoke`, any other word | "Unknown command.  Try help." |
+
+**Other changes of the lane.** `level.load` places only the objects of a page that are still on the level (`o.Level == level`), so an
+object adopted into a pack before its page is asked for is not placed. `Dispatcher.RemoveObFromMap` takes an object that leaves a map
+out of the `container` of the players who have it open (`remove_ob`), and the flush keeps the proxy of an open container that is on
+the ground ("Containers" above; docs/differences.md, "Containers"). The member `mudverbose` is a number, not a bool.
+
+## The account completion and trade (lane 7B of phase 3, wave 7; docs/mud-phase3.md sections 4.5 and 4.7)
+
+Ported C: `Gk/AccountLife.cs` (server/login.c `check_login` after the file is read, and server/c_range.c `legal_range`) and `Gk/Trade.cs`
+(the weight test of server/c_object.c `pick_up_object`). The rest is `Dispatcher.Wave7B.cs`, `Gk/Manifest.Wave7B.cs` and
+`Gk/TMudObjectMembers.Wave7B.cs`. Tested in `AccountLifeTests.cs` and `TradeTests.cs`.
+
+**What a login does to the tree it read (`check_login`).** C's `check_login` reads the file and then runs `sum_weight`,
+`init_player_exp`, `link_player_skills`, `legal_range` on the player's `shoottype` (an illegal one becomes `range_none`) and
+`fix_player`, before it sends the inventory (login.c lines 744 to 757 at 8b7ee7f90). So **C runs `fix_player` at login**, and the
+extension now does the same (`AccountLife.CheckLogin`, called by `FixLoadedAccount`): at `player.login` and at `loadmudaccount` /
+`Mud_LoadAccount`, for a player that was read from a file, after the controller is attached and before the strings are set, so the
+strings of the login show the life, the stats and the weight of the items the file holds (a file whose items give a bonus shows it at
+once, where the first change of the tree showed it before). A player that was made new (no file) does not pass it, as in C (a new
+player is made by `confirm_password` and the start path). Not ported of `check_login`: the password, the file's header lines (the
+extension keeps its own), the map and the savebed, the dragon's name, "Welcome Back!", the death of a player saved with no life, and
+the sending of the inventory (the first flush does it). Two deviations, both about worlds C does not have: a world with no experience
+category (the tests' invented worlds) skips `init_player_exp` and `link_player_skills` (C would set the player's experience to the sum of
+no objects, 0), and `legal_range` does not keep `known_spell` and `chosen_item_spell` (only the casting of wands and rods reads them) and has
+no `chosen_spell` (a known spell makes `range_magic` legal). A player's `shoottype` is not in the file, so it starts as `range_none`.
+`link_player_skills` unreadies every skill, as C does at login: a player must ready his skill again.
+
+**The equipment hooks at login.** After the strings, for each applied item of the top level of the tree in the order of the tree, the
+player event of the apply that C's login would have made (`SendApplyHook` of lane 6B: `onWeaponWielded`, `onArmorWorn`,
+`onClothWorn`, `onWandReadied`, with the item as argument), then `onLoadedMudAccount`, in the one reply. Items of a type without a hook
+(a bow, a rod, a horn, a skill, an experience object) send nothing; a 1.0 link sends none. They are sent once for a load (a login of a
+file, `loadmudaccount` after `unloadmudaccount`, a suffix or `Mud_LoadAccount`), not for the no-op of `loadmudaccount("")` and not for
+a second `player.login` of a player who is still logged in (that one only sends the strings again).
+
+**`backupmudaccount(name)`.** The copy is `backups/<escaped file name><name>.<UTC time>.txt`. The name is a suffix of the account's
+file name, checked like an account's: the whole file name is escaped (a `/`, a `..` or a `%` is made harmless: the copy cannot leave
+`backups/`), a control character fails the call (bad_args) and so does a name that makes the file name longer than an account's may be
+(200 bytes escaped). The empty name (what GK passes) gives the name of before, `backups/<file>.<time>.txt`. Two copies in the same
+second overwrite each other.
+
+**Functions and the method.**
+
+| Name | Id | Parameters | Returns | Notes |
+| --- | --- | --- | --- | --- |
+| `mudexamineinvobject2` (function, 1.1) | 13000 | `int` index, `int` id | `bool` | `ctx.player` reads the examine text of an item of the player at the index of `level.players` (query `player.at`) |
+| `mudtransferobject` (function, 1.1, slow) | 13001 | `int` id, `int` 0, `int` index, `int` n | `bool` | gives n (0: all) of his item to the player at the index |
+| `examineinvobject` (TMudPlayer) | 13500 | `int` id | `bool` | the player examines an item of his own tree |
+
+Both functions need the query `player.at` (`[asker's account, index]` -> the account at that index of `level.players` of the asker's
+level, or nil), which a 1.0 link does not have: they are `MinMinor 1`, so on a 1.0 link they are not in the manifest and their
+operation is `unknown_op`. A failed query fails the call with the host's status and changes nothing. The other player must be logged
+in in this extension and have his account loaded; a name the host gives that the extension does not hold, an unloaded account and a
+negative index (GK's `getplayerindex` answers -1 for no player: the host is not asked) give false.
+
+- **`mudexamineinvobject2(index, id)`** looks for `id` in the tree of the player at the index only (his top level, his open container
+  and his sacks: `FindItemById(deep: true)`), and `ctx.player` is the one who reads the text (`ExamineBy`, through `DrawInfo`, the same
+  lines as `mudexamineinvobject`). An id of the asker's own tree gives false when the index names another player. The owner reads nothing.
+- **`player.examineinvobject(id)`** is `mudexamineinvobject` for a player's handle (GK's transmogrification table calls it for its own
+  player, with an id of his own tree). It is true only when the handle is the player of the request's context (ids resolve in the tree of
+  `ctx.player` only, mud-phase3.md section 4.2): the handle of another player gives false and nothing is said.
+- **`mudtransferobject(id, 0, index, n)`** (slow: busy before anything changes). `id` is looked for in `ctx.player`'s own tree (deep),
+  the receiver is the player at `index`. False, with nothing changed, for: a second argument that is not 0 (GK's fishing rod passes 1 with
+  the index 0; nothing shows what the original did with it, so the extension does not guess), a negative `n` or more than the stack has
+  (refused silently: C would take the whole stack, a trade should not), an item with `FLAG_NO_DROP` or `FLAG_STARTEQUIP`, an invisible object, an item that is not in his own pack (one in an open sack of the ground belongs to the level), no receiver at the index, the giver
+  himself, a receiver that is not logged in here or is unloaded, a failed query (the call fails), an item that cannot be taken off (an
+  applied cursed weapon: `apply_special` says why), and a receiver that cannot carry it: C's test of `pick_up_object` (`weight` of the objects
+  and of what a container holds after its reduction, plus what he carries, against `weight_limit[Str]` of the receiver) says "That item
+  is too heavy for you to put it in your inventory." to the **receiver**, the picker of the C function. Otherwise: an open container that
+  is the item or holds it is closed (`esrv_apply_container`), an applied item is taken off (`apply_special` with `AP_UNAPPLY`, so the
+  giver's script gets `onWeaponUnWielded` and its kin), a part of a stack is split off (`get_split_ob`), the giver's mark and current
+  weapon are cleared when they are the item, the item leaves his tree (its tag and those of what it holds die, as a drop's do) and enters
+  the receiver's (`insert_ob_in_ob`: it merges into a stack that can take it), `fix_player` runs for both, both windows are looked at again at the
+  flush (the giver's string is deleted or smaller, the receiver's is new: **the receiver knows it by an id of his own**, as a script can
+  read from `mudid`), and the move is written by `SubmitMove(null, giver, null, receiver)`: the giver's file first and at once, then the
+  receiver's, so that a crash between the two loses the item and never copies it. No `onPickup`-like event and no text for a success:
+  GK's trade script says what it wants. Nothing is set as `mudowner`.
+

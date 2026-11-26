@@ -1460,7 +1460,8 @@ public sealed class LivingStringsTests
     {
         // Arrange
         using DirectExt ext = Start("bob");
-        ulong h = Login(ext, "bob").Result.AsHandle;
+        ReplyFrame login = Login(ext, "bob");
+        ulong h = login.Result.AsHandle;
 
         // Act
         ReplyFrame r = Do(ext, "bob", change: true, magic: 1);
@@ -1472,7 +1473,8 @@ public sealed class LivingStringsTests
         Assert.Equal(Get(ext, h, Ply("mudwc")).AsInt.ToString(), sets["clientr.mud_wc"]);
         Assert.DoesNotContain("clientr.mud_ac", sets.Keys);
         Assert.DoesNotContain("clientr.mud_speed", sets.Keys);
-        Assert.Equal("14", sets["clientr.mud_str"]); // the first fix of the player brings the rolled stats in
+        Assert.DoesNotContain("clientr.mud_str", sets.Keys); // the fix of the login (check_login) brought the rolled stats in already
+        Assert.Equal("14", Strings(login)["clientr.mud_str"]);
     }
 
     [Fact]
@@ -1480,13 +1482,14 @@ public sealed class LivingStringsTests
     {
         // Arrange: the insert of the item fixes the player, but the flag is set after it and change_abil is not called
         using DirectExt ext = Start("bob");
-        Login(ext, "bob");
+        ReplyFrame login = Login(ext, "bob");
 
         // Act
         ReplyFrame r = Do(ext, "bob", change: false);
 
-        // Assert: damage is 0 + dam_bonus[14] 1, without the sword
-        Assert.Equal("1", Strings(r)["clientr.mud_dam"]);
+        // Assert: damage is 0 + dam_bonus[14] 1, without the sword: the login's fix wrote it, the sword's insert did not change what the client has
+        Assert.Equal("1", Strings(login)["clientr.mud_dam"]);
+        Assert.DoesNotContain("clientr.mud_dam", Strings(r).Keys);
     }
 
     [Fact]

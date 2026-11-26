@@ -27,7 +27,7 @@ internal static partial class TMudPlayerMembers
         Method(b, methods, MethodLoadMudAccount, "loadmudaccount", new[] { "string" }, "bool");
         Method(b, methods, MethodUnloadMudAccount, "unloadmudaccount", Array.Empty<string>(), "void");
         Method(b, methods, MethodSaveMudAccount, "savemudaccount", Array.Empty<string>(), "void");
-        Method(b, methods, MethodBackupMudAccount, "backupmudaccount", Array.Empty<string>(), "void");
+        Method(b, methods, MethodBackupMudAccount, "backupmudaccount", new[] { "string" }, "void");
         Method(b, methods, MethodMudLoadAccount, "Mud_LoadAccount", new[] { "string" }, "bool");
     }
 
