@@ -231,3 +231,30 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
   section 4.7 gives its source). Alpaxis's choices: `mudclass` is the class name without `_class`; choosing a class again takes the
   first choice's items out; `mudresetplayer` clears `mudclass`; `loadmudaccount` with a suffix fails when the file is missing;
   `backupmudaccount` writes `backups/<file>.<UTC time>.txt`; the methods answer a bool where a script might test them.
+
+## Pick up and drop (`Crossfire.Extension/Gk/Pickup*.cs`; lane 5A of phase 3)
+
+- **An object on the ground is a level object.** The object model has no squares: C's `remove_ob` of an object on a map is the
+  extension's `npc.remove` and the removal from the level's list, and `insert_ob_in_map` of a dropped object is a new level object
+  with an `npc.place` (the same handle the item had; never merged with another object of the square; no script variables, no blob).
+  A level object is flagged `FLAG_REMOVED` all the time (the extension never inserts it in a map), so `pick_up_object` takes the branch
+  C has for an object that is removed already.
+- **`unpaid` is refused by the script functions** `mudpickupobject` and `mudpickupobject2` (false, no text), as `nopick` is: Alpaxis's
+  choice (docs/mud-phase3.md section 3, rule 6). C lets a player take an unpaid object and tells him what it will cost; `command_take`
+  (which Graal Kingdoms' command table does not have) keeps that.
+- **"That item is too heavy for you to put it in your inventory."** is the text for a pick up that is too heavy (docs/mud-phase3.md
+  section 4.2); C says "...to pick up.".
+- **`drop_object` with a number for an object that is no stack.** C's test `nrof && tmp->nrof != nrof` sends `muddropinvobject(id, x, y, 1)`
+  of a sword (`nrof` 0) to `get_split_ob`, which answers "There are only 1 swords."; a script that drops a count of one would never
+  drop a sword. A number equal to what the object has (`nrof`, or 1 for an object that is no stack) is the whole object here; a
+  larger number says "There are only N <name>s." and changes nothing, as C's `get_split_ob` does for a stack.
+- **A negative number** (the script's `n` of `mudpickupobject` or `muddropinvobject`) changes nothing and answers false; C's count is
+  unsigned.
+- **A drop on a level the extension does not hold** (a group or single-player level, a position in no segment of a gmap, a level that
+  has the most objects it may) answers false and "You can't drop that here." before anything changes (docs/mud-phase3.md section 3, rule 8).
+- **`mudowner`** of a dropped object is the dropping player's account (C has no such field: its `owner` would keep the object out of the
+  level file, docs/mud-phase3.md section 3, rule 5).
+- **An applied object is not dropped** until wave 6 sets `Dispatcher.ApplySpecialUnapply` (C calls `apply_special` to unapply it first);
+  a drop into an open container does nothing until `Dispatcher.PutObjectInSack` is set.
+- **The square of `command_take`** is the level's objects whose tile is the player's (the position from the query `player.pos`),
+  the one placed last first; C's chain `op->below`. An object that no `level.load` has shown to the host yet is not on the square.
