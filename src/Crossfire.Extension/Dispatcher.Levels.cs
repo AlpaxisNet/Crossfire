@@ -503,11 +503,6 @@ internal sealed partial class Dispatcher
                 {
                     return Outcome.Fail(Status.Internal, "the object cannot be cloned");
                 }
-                if (copy.Arch != null)
-                {
-                    copy.X = copy.Arch.Clone.X;
-                    copy.Y = copy.Arch.Clone.Y;
-                }
                 LevelObject clone = Attach(lo.Level, copy, x, y);
                 clone.SaveLocally = lo.SaveLocally;
                 effects.Add(PlaceEffect(clone));

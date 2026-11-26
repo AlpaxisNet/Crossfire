@@ -196,6 +196,7 @@ public class GkWorldTests
         }
         output.WriteLine("classes in the world " + classes.Count + "; special " + special + ", monsters " + monsters + ", mudobjects " + plain
             + " (graalnpctype 2 without a class " + type2NoClass + ", graalnpctype 1 without one " + type1NoClass + ")");
+        output.WriteLine("the first archetype of type PLAYER (a new player): " + world.GetPlayerArchetype(null)?.Name);
         Assert.True(classes.Exists("mudobjects"));
         Assert.Equal(2015, classes.Count);
         Assert.Equal(307, special); // objects.md 3.1: 307 of the archetypes that have a special_ script have graalnpctype 2

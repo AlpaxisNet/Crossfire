@@ -616,7 +616,9 @@ that is nil until the host passes the player object itself (a protocol gap, repo
 - Position and blob: the host's row replaces the extension's; an empty blob is none; the seed's `flag` lines are the props until then.
 - `onUpdateObject` fires for every writable member (also `img`, `savelocally`, the extra-line members), not for players.
 - `onLoadedMudAccount` fires once per load, not at a second login; its argument is the handle of the player.
-- A new player is the first PLAYER archetype of the world; its `name` is the account. Class, race and stats are phase 3.
+- A new player is the first PLAYER archetype of the world in the order of the archetypes (C's `get_player_archetype(NULL)`; in Graal
+  Kingdoms' own `Arch` that is `dwarf_player`); its `name` is the account. Class, race and stats are phase 3: whether Graal Kingdoms'
+  players start from another archetype is not known.
 - A file that exists and cannot be read is never written over, whether it is a level or an account.
 - `mudaddobject` of a level not held reads the level first and leaves its other objects to the host's `level.load`.
 - `object.destroyed` for a handle that is no level object (an archetype, a player) is `bad_handle`.
