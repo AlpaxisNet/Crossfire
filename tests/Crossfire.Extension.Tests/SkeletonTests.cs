@@ -203,7 +203,8 @@ public sealed class SkeletonTests
         Assert.True(Val.Same(Manifest.Build(false, 1), manifest));
         Assert.Equal(new[] { "onRPGMessage" }, manifest.Get("events")!.Items.Select(e => e.Get("name")!.AsString).Where(n => n.StartsWith("onRPG")));
         Assert.Equal(new[] { "mudplayers" }, manifest.Get("player_classes")!.Items.Select(c => c.AsString));
-        Assert.DoesNotContain(manifest.Get("events")!.Items, e => e.Get("target")!.AsString == "item");
+        // the item events are the lanes' of wave 6 (6B declares onApply); waves 4 and 5 declared none
+        Assert.Contains(manifest.Get("events")!.Items, e => e.Get("target")!.AsString == "item" && e.Get("name")!.AsString == "onApply");
     }
 
     [Fact]
@@ -310,7 +311,7 @@ public sealed class SkeletonTests
         ("a member id outside the lane", (Action<ManifestBuilder>)(b => b.AddType(Lane.Items, new TypeDef(10, "TX", TypeMap(10, 2000, "TX"))))),
         ("a member id of the core's", (Action<ManifestBuilder>)(b => b.AddType(Lane.Items, new TypeDef(10, "TX", TypeMap(10, 545, "TX"))))),
         ("a member id used in two types", (Action<ManifestBuilder>)(b => { b.AddType(Lane.Items, new TypeDef(10, "TX", TypeMap(10, 1000, "TX"))); b.AddType(Lane.Items, new TypeDef(11, "TY", TypeMap(11, 1000, "TY"))); })),
-        ("an event name used twice", (Action<ManifestBuilder>)(b => { b.AddEvent(Lane.Items, new EventDef("onA", "player")); b.AddEvent(Lane.Items, new EventDef("onA", "object")); })),
+        ("an event name used twice for the same target", (Action<ManifestBuilder>)(b => { b.AddEvent(Lane.Items, new EventDef("onA", "player")); b.AddEvent(Lane.Items, new EventDef("onA", "player")); })),
         ("an event target that is none", (Action<ManifestBuilder>)(b => b.AddEvent(Lane.Items, new EventDef("onA", "level")))),
         ("an event mode that is none", (Action<ManifestBuilder>)(b => b.AddEvent(Lane.Items, new EventDef("onA", "player", "later")))),
         ("a type whose map has another name than the registered one", (Action<ManifestBuilder>)(b => b.AddType(Lane.Items, new TypeDef(10, "TX", TypeMap(10, 1000, "TZ"))))),
@@ -324,6 +325,23 @@ public sealed class SkeletonTests
         ("id", Val.Int(id)), ("name", Val.Str(name ?? "T" + id)), ("host", Val.Str("object")),
         ("members", Val.List(Val.Map(("id", Val.Int(member)), ("name", Val.Str("m")), ("type", Val.Str("int")), ("access", Val.Str("r")), ("stable", Val.False)))),
         ("methods", Val.List()));
+
+    [Fact]
+    public void ManifestBuilder_Given_one_event_name_for_two_targets_When_added_Then_both_are_in_the_manifest_and_each_is_found_by_its_target()
+    {
+        // Arrange
+        var b = new ManifestBuilder(1);
+
+        // Act: the name onApply is an event of an item's proxy and of an object a level shows (protocol section 6)
+        b.AddEvent(Lane.Items, new EventDef("onA", "item"));
+        b.AddEvent(Lane.Items, new EventDef("onA", "object"));
+
+        // Assert
+        Assert.Equal(new[] { "item", "object" }, b.ToVal().Get("events")!.Items.Where(e => e.Get("name")!.AsString == "onA").Select(e => e.Get("target")!.AsString));
+        Assert.Equal("object", b.FindEvent("onA", "object")!.Target);
+        Assert.Equal("item", b.FindEvent("onA", "item")!.Target);
+        Assert.Null(b.FindEvent("onA", "player"));
+    }
 
     [Theory]
     [MemberData(nameof(Refusals))]

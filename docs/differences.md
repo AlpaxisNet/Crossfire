@@ -262,10 +262,39 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
   has the most objects it may) answers false and "You can't drop that here." before anything changes (docs/mud-phase3.md section 3, rule 8).
 - **`mudowner`** of a dropped object is the dropping player's account (C has no such field: its `owner` would keep the object out of the
   level file, docs/mud-phase3.md section 3, rule 5).
-- **An applied object is not dropped** until wave 6 sets `Dispatcher.ApplySpecialUnapply` (C calls `apply_special` to unapply it first);
-  a drop into an open container does nothing until `Dispatcher.PutObjectInSack` is set.
+- **An applied object is unapplied before it is dropped** through `Dispatcher.ApplySpecialUnapply`, which lane 6B sets (C calls `apply_special`); a cursed one stays. Without that hook (a dispatcher that did not run `session.init`) an applied object is not dropped;
+  a drop into an open container is `Dispatcher.PutObjectInSack` (lane 6A, "Containers" below).
 - **The square of `command_take`** is the level's objects whose tile is the player's (the position from the query `player.pos`),
   the one placed last first; C's chain `op->below`. An object that no `level.load` has shown to the host yet is not on the square.
+## Containers (`Gk/Container.cs`, `Gk/ContainerApply.cs`, `Dispatcher.Wave6A.cs`; lane 6A of phase 3)
+
+- **`put_object_in_sack` moves a container's contents into `op->container`.** C reads that pointer without looking: it is null when
+  `esrv_move_object` puts a container that holds objects onto a sack and no container is open, and C then crashes in `query_name`. The
+  target sack stands in for it. When another container is open, C's mixture is kept: the open one is asked whether each object fits and
+  the object goes into the sack that was named.
+- **The count of a stack.** A count that is the whole object (its `nrof`, or 1 for an object that is no stack) is no part of it, as in
+  `drop_object` (above): `mudmoveinvobject(id, to, 1)` of a sword puts the sword in; C would send it to `get_split_ob`, which says "There
+  are only 1 swords.". A larger count is refused by `get_split_ob` with its text after `sack_can_hold` passed.
+- **C names a stack by its plural without the number.** "You put the bananas in sack (open) (active)." for four bananas, "You pick up
+  the bananas.", "The swords is not a container." for a sword that is no stack (its `nrof` is 0): `query_name` of C, as 5A found for the pick up.
+- **`esrv_move_object` has no drop to the ground and no count of the player.** `to` 0 (C: the ground) and -1 are Graal Kingdoms' window
+  (the pack), which is `pick_up`; `muddropinvobject` drops. `pl->count`, the one id C sends for the pack, is the tag of the player's own
+  handle (the object model's `count` is not a script's id); an item's tag wins when the two are equal. `to` may also be the id of the open
+  container, which is the proxy's tag that `mud_container` names, so that a container on the ground can be the target.
+- **The weight test of a move out of a sack counts the object twice.** `pick_up_object` adds the weight of what is picked up to what the
+  player carries, and the object is part of what he carries already; a player near his limit cannot take an object out of his own sack.
+  C does the same; the port keeps it.
+- **`usekeys` is `key_inventory` for every player** (C's default, which a player gets when his object is made; the command and the
+  saved setting are not ported). A key in a sack of his pack is not used: "The X in your Y vibrates as you approach the door", with no
+  colour (`NDI_BROWN` is not carried by `DrawInfo`). The message says "the door" for a locked container too, as C does.
+- **Nothing closes an open container when the player walks away** (C's `FLAG_WALK_OFF` sets it up; the host moves the player, not this
+  world), and the `EVENT_CLOSE` of the plugins is not run. A container on the ground opened here stays open (and its `applied`, `walk_off`
+  and `fly_off` are in the level file) until closed, until the player logs out, or until its level unloads or a script destroys it (both close it first, `CloseOpenOn`); after a restart the level object is "applied" with nobody
+  holding it open, which `esrv_apply_container` handles as C does (it is cleared and set again by the next open).
+- **A container on the ground has no item string and no `findinvobjectbyid` id.** Its tag is the one of its proxy, shown in
+  `mud_container` and accepted by `mudmoveinvobject`. A container that is picked up whole while it is open keeps `op->container`: close it first.
+- **`apply_container`** (the version of C for a player without a client window) is not ported; see porting.md.
+
 ## The inventory functions (`Gk/Inventory.cs`, `Dispatcher.Wave5B.cs`; lane 5B of phase 3)
 
 Choices of Alpaxis where Graal Kingdoms' functions have no original in Crossfire (the names are in `docs/extension.md`, "The inventory
@@ -311,3 +340,98 @@ functions").
   extension knows nothing of gives no effects; the extension still takes the first `level.load` of a name as the host's announcement of
   that level, so that `muddropinvobject` can place an object in a level where nothing has ever been made. Without it, the first drop in
   every level that has no seed was refused ("You can't drop that here."). Nothing is written for such a level until it holds an object.
+
+## Apply and wearing (`Gk/Apply*.cs`, `Dispatcher.Wave6B.cs`; lane 6B of phase 3)
+
+- **The plugin hook of `manual_apply` is the script's `onApply`.** C asks the object's plugin and, if it answers non-zero, does nothing
+  more. Here the extension sends the player event `onApplyItem` (always, with the item) and the item event `onApply` on the item's proxy
+  with the invoke of `defaultApply` as its `fallback`; the host runs the class function, which usually calls `this.defaultApply(pl)`,
+  and runs the fallback when the class has none (docs/mud-phase3.md section 4.4). `manual_apply` answers 1 at once: the script decides
+  later, in a request of its own. On a link of 1.0 (no item events, no `fallback`) the switch runs at once. `apply -a` and `apply -u`
+  (`command_apply`) also run at once: the fallback carries no flag.
+- **An object on the ground gets `onApply` as an `object` event (wave 6 integration).** The manifest declares the name `onApply` twice,
+  once for the target `item` and once for the target `object` (protocol section 6: the pair of name and target is unique). `mudapplyobject`
+  and `apply` of a level object send the event to the NPC that shows it, with the player as the argument and the invoke of `defaultApply`
+  on the object as the fallback: the class that the face joined (GK's `showobject` joins `mudtype_container` and `mudtype_food`) decides,
+  as it does for an item, so a restricted chest's `restrictaccess` check runs before the default. A face that joined no class gets the
+  fallback. On a link of 1.0 (neither event) the switch runs at once. The object's own script is the NPC's, so the function of the class
+  has `this` the face; its call `this.defaultApply(pl)` is a request on the object's handle with the player in the argument.
+- **`defaultApply(pl)` says what `player_apply` says.** Its answer is `manual_apply`'s (0, 1 or 2), and for 0 and 2 it says "I don't know
+  how to apply the X." and "You must get it first!", which C's `player_apply` says after the switch.
+- **Applies that need code that is not here do not use the object up.** Scrolls, spell books, skill scrolls, rods, horns, skill tools,
+  the improvers, the clock, the shop menu, the power crystal, the save bed and exits say "That is not available yet." and answer 1
+  (told). Handles and triggers do nothing and answer 1 (docs/mud-phase3.md section 4.4; the map's buttons are not here). Furniture (160)
+  and house doors (161, unless lane 6D answers) say "You can't apply that.".
+- **Graal Kingdoms' types.** 162 and 163 (tools) are wielded in the place of the weapon: wielding one takes a wielded weapon or tool
+  off and the other way round, they set `current_weapon` (so `getwieldedobject` names them) and need `can_use_weapon` and
+  `check_weapon_power` like a weapon, but no skill. 164 to 166 (mask, legs, body) are worn, one per type, like armour but without
+  `can_use_armour` (clothes are not armour). Both are [I]: nothing shows what Graal Kingdoms' own server did.
+- **A weapon's refused wield gives the part of a stack back.** C's `apply_special` splits `nrof - 1` off a stack before it checks the
+  skill, and `return 1` after a failed `check_skill_to_apply` leaves the split-off object in no inventory (it is lost). Here it goes back
+  into the player's inventory, as it does for the other refusals.
+- **The hooks after a change.** `onWeaponWielded`/`UnWielded` (weapons, tools), `onWandReadied`/`UnReadied`, `onArmorWorn`/`UnWorn`
+  (the armour types, rings and amulets) and `onClothWorn`/`UnWorn` are player events with the item as typed argument, sent after the
+  flag `applied` is set or cleared and after `fix_player` (so `getwieldedobject` and the strings are right); the unapply of the rival
+  of a slot sends its hook first, and a taken-off object that merged into a stack gives the stack as the argument. Bows, rods, horns and
+  skills have no hook (`mudplayers` declares none). On a link of 1.0 none is sent.
+- **The class of an item's type** (`GkSettings.MudTypeName`, `GkClasses.MudTypeClass`) is `mudtype_<name>` when the world has that class,
+  else `mudtype_general`. The names are Crossfire's (`weapon`, `potion`, `container`, `sign`, `book`, `scroll`, `skill`, `treasure`,
+  `lighter`, `poison`, ...) and the names of Graal Kingdoms' own files (`fireweapon` for a bow, `cfhandle`, `powercrystal`,
+  `armourimprover`, `weaponimprover`, `skillscroll`); rings and amulets are `armour`; flesh and drink are `food` [G]; 161 is
+  `housedoor`, 162 and 163 `tool`, 164 to 166 `cloth`. The other armour types (helmet, shield, boots, gloves, girdle, bracers, cloak)
+  have no class of their own and use the general one, as the rule says; whether Graal Kingdoms' own server sent them to `armour` is
+  not known.
+- **The unapply of a dropped object and of a skill.** `Dispatcher.ApplySpecialUnapply` (lane 5A's `drop_object`) and
+  `SkillTable.ApplySpecial` (lane 5D's `change_skill`) are set at `session.init` and call `apply_special`.
+
+## Consumables (`Gk/Consumable.cs`; lane 6C of phase 3)
+
+`apply_food`, `eat_special_food`, `dragon_eat_flesh`, `apply_poison` and `apply_potion` are ported from `server/apply.c` at 8b7ee7f90 with
+C's arithmetic (golden values: `tests/Crossfire.Extension.Tests/golden/consumable_golden.c`). What differs, and why:
+
+- **A potion whose effect needs code the extension does not have is not drunk.** A potion that casts a spell (`stats.sp` is not 0, which
+  includes C's "super" stat potions), a cursed potion of restoration (`drain_stat`) and a protection potion (a `force` of type
+  `POTION_EFFECT` that the tick of C counts down; the extension has no tick, so the protection would never end) tell the player "That is
+  not available yet." through `DrawInfo` and stay in the pack, as the design says (mud-phase3.md 4.4: 39 of Graal Kingdoms' 51 potion
+  archetypes would be eaten for nothing). C has already identified the potion by then, so it is identified. `apply_potion` still
+  returns 1 (manual_apply's value).
+- **Food that changes stats or protects** (`eat_special_food`'s `cast_change_attr`: strength, dexterity, constitution, charisma and the
+  twelve resistances that have a protection spell) says "That is not available yet." and is **not eaten**: nothing changes, the stack
+  stays, no `onEatFood` is sent (docs/mud-phase3.md 4.4: an apply that cannot be done uses nothing up). The hit and spell points of the
+  other special food are applied as in C.
+- **`hit_player(..., AT_POISON)` does no damage.** In C an attack of type poison has `dam = 0` after the roll for the effect (the type is an
+  effect, `hit_player_attacktype`), so a poisonous drink and a cursed food lose no hit points; what C does is `poison_player` (a
+  `poisoning` force that the tick works on), which is left out with the rest of the tick. The line of text and the loss of a quarter of
+  the food level are C's. `contr->killer` is not kept (nothing kills a player in the extension).
+- **`new_draw_info`'s colour** is not passed (the skin message of a dragon is red in C).
+- **`onEatFood(foodarch, food, wascursed)`** is a player event that Graal Kingdoms' `mudplayers` defines; it is sent after the food is
+  used up on a link of 1.1 (it has typed parameters), so `food` is a dead handle (nil in the script) when the last item of the stack was
+  eaten; the archetype is always there. It is not sent for a monster and not for a potion or poison (C's eating is food, drink and flesh).
+
+## Signs, books, lighters and chests (`Gk/Readable.cs`, `Gk/Lighter.cs`, `Dispatcher.Wave6D.cs`; lane 6D of phase 3)
+
+- **A book gives no experience and is not marked.** C's `apply_book` gives experience for the first reading (`calc_skill_exp`, `add_exp`),
+  identifies the book and sets `FLAG_NO_SKILL_IDENT` so that it gives none again. Phase 3 has no experience: the text is shown and the
+  book stays as it is, so that a later phase gives the experience once. C's `apply_book` of this version teaches no spell (that is
+  `apply_spellbook`, a spell item of a later phase), so there is no "not available yet" branch in it. The skill literacy is needed as in
+  C: a player whose pack has no literacy skill (and whose `apply_special` can not ready it) gets "You have no knowledge of literacy." and
+  "You are unable to decipher the strange symbols.".
+- **Colours.** C writes a sign's and a book's text with `NDI_NAVY`; `DrawInfo` has no colour, so the text goes uncoloured.
+- **A lighter** is C's, with the saving throw of `attack.c` for fire (`did_make_save_item`, `save_throw_object`) as far as an object of an
+  inventory reaches it: the marked object always has an environment and no map, so `stop_item`, the cold, cancellation and map
+  branches of `save_throw_object` are not ported. Things it makes (the `other_arch` of a glowing object, the `burnout`) are made by
+  `Dispatcher.NewItem` (identified); an archetype that does not exist gives C's singularity. C's `lighter->nrof -= 1` of a split stack
+  does not change the weight carried; neither does the port (the next `fix_weight` does).
+- **A chest nobody filled gets its treasure at the first apply.** C fills a chest when its map is loaded the first time
+  (`fix_auto_apply`: `create_treasure(randomitems)`, `stats.hp` times), and a chest made later is empty ("The chest was empty." and
+  gone). The chests of this extension are made by `NewItem` at any time, so the first apply of a chest that has no contents, has a
+  treasure list and is not a template (`FLAG_AUTO_APPLY`) makes them (difficulty of the level it lies in, 14 in a pack, as
+  `auto_apply`), identified, with `stats.hp` counted down as C does. A chest read from a file keeps what the file says.
+- **The contents come out at the player's feet**, as a drop's do (`player.pos`, then the level the extension holds there), each as a new
+  level object (never merged), without `mudowner` (C sets none). When the extension holds no level there, or the host does not answer
+  the query, nothing changes and the player is told "You can't drop that here." (a drop's text, docs/mud-phase3.md section 3, rule 8).
+  The level's limit of objects is checked once, before the first thing comes out, so a chest may take a level a few objects over it. A
+  move from a pack to a level goes through `SubmitMove` (account first); a chest on the ground in another level than the feet goes level
+  to level.
+- **The trap of a chest** (C springs a `RUNE` found in it) is not ported (traps are phase 4).
+- **Types 160 (furniture) and 161 (house doors)** answer "You can't apply that." (housing is not phase 3). C has no such types.

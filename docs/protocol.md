@@ -252,13 +252,13 @@ maps without regard to the order of keys), or the host runs without the extensio
 | --- | --- |
 | `functions` | list of maps `{id, name, params, ret, slow}` (*optional*, default []): `id` an int from 64 to 2^31 - 1, unique; `name` the script function's name; `params` a list of type names; `ret` a type name; `slow` a bool (*optional*, default false: the host allows the function a longer deadline) |
 | `types` | list of maps `{id, name, host, members, methods}` (*optional*, default []): `id` an int from 1 to 2^31 - 1, unique; `name` the script type's name (what `objecttype()` gives), unique; `host` one of `object`, `npc`, `player` (section 6.2); `members` a list of maps `{id, name, type, access, stable}` (*optional*, default []), with `access` "r" or "rw" (*optional*, default "r") and `stable` a bool (*optional*, default false, section 6.1); `methods` a list of maps `{id, name, params, ret}` (*optional*, default []) |
-| `events` | list of maps `{name, target, mode, params}` (*optional*, default []): `name` unique; `target` one of `object`, `player`, `global`, and (1.1) `item`; `mode` `sync` or `deferred` (section 11); (1.1) `params` a list of type names (*optional*: absent, the event has its 1.0 behaviour; section 11) |
+| `events` | list of maps `{name, target, mode, params}` (*optional*, default []): the pair `name` and `target` unique (one name may be declared once for each target: `onApply` is an `item` event for an object in a pack and an `object` event for one a level shows, and the class function that handles it is the same); `target` one of `object`, `player`, `global`, and (1.1) `item`; `mode` `sync` or `deferred` (section 11); (1.1) `params` a list of type names (*optional*: absent, the event has its 1.0 behaviour; section 11) |
 | `wants_tick` | bool (*optional*, default false): the host sends `session.tick` |
 | `limits` | map `{max_list}` (*optional*): `max_list` an int from 1 to 4,096 (*optional*, default 256), the most rows `get_list` gives |
 | (1.1) `player_classes` | list of strings (*optional*, default []): the names of script classes the host joins to every player it binds (section 6.2). The Crossfire extension gives `["mudplayers"]` |
 
 - **Ids.** Member and method ids are ints from 1 to 2^31 - 1, unique together across the whole manifest. Function, type and event
-  names, and the member and method names of one type, are unique when compared with ASCII case folding; names match
+  names (an event's name together with its target), and the member and method names of one type, are unique when compared with ASCII case folding; names match
   `[A-Za-z_][A-Za-z0-9_]*` and are at most 64 characters long. A name the host already uses for a built-in function, or for a built-in
   property of the object the members land on (section 6.2), makes the manifest invalid.
 - **Type names:** `int`, `float`, `bool`, `string`, `any`, `void` (only as `ret`: the result is nil), `handle:<type>` (a handle whose
@@ -464,7 +464,7 @@ REPLY in order after its effects:
 With mode `sync` an event runs at once, before the call that caused it returns to the script; with `deferred` it runs in the host's
 next script frame. The events of a late REPLY, and `sync` events nested more than 8 deep, run deferred. A script run by an event may
 make requests of its own: each is a new REQ, sent after the REPLY that fired the event was read, and its own effects and events are
-applied at its own REPLY, before the remaining events of the first. An event with an unknown name, a target other than the manifest's,
+applied at its own REPLY, before the remaining events of the first. An event with an unknown name, a target the manifest does not declare for that name,
 a missing key, an object no NPC shows (target `object`), or a player who is not online is skipped and counted. (1.1) A `sync` event
 of target `item` (and of no other target) may also run deferred when the host cannot run it nested, as 11.1 says; the host counts it.
 

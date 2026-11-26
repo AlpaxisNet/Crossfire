@@ -562,6 +562,23 @@ public sealed class PickupTests
     }
 
     [Fact]
+    public void PickUp_Given_a_sword_of_nrof_1_as_Graal_Kingdoms_archetypes_have_When_dropped_and_picked_up_Then_the_text_is_the_singular_name_as_query_short_name_gives()
+    {
+        // Arrange: C's query_short_name names an object by its plural unless nrof is 1 (it names one that has no nrof, no weight, no title and no
+        // magic by the singular; a sword has a weight). 203 of the 205 weapon archetypes of the world have "nrof 1": the text of a pick up is singular.
+        using var g = new Game(inventory: "arch sword\nnrof 1\nend\n");
+        ulong sword = g.Items(g.Player).Single(i => i.Name == "sword").Handle;
+        Assert.True(Result(g.Drop(sword, 2, 2, 0)));
+
+        // Act
+        ReplyFrame r = g.Pick(sword, 1);
+
+        // Assert
+        Assert.True(Result(r));
+        Assert.Equal(new[] { "You pick up the sword." }, Lines(r));
+    }
+
+    [Fact]
     public void PickUp_Given_an_item_already_in_the_pack_or_in_another_players_tree_When_picked_up_Then_false()
     {
         // Arrange
@@ -885,6 +902,7 @@ public sealed class PickupTests
         var asked = new List<string>();
 
         // Act
+        g.Ext.Dispatcher.ApplySpecialUnapply = null; // lane 6B sets it at session.init: this test is for a dispatcher without apply code
         ReplyFrame without = g.Drop(sword, 1, 1, 0);
         g.Ext.Dispatcher.ApplySpecialUnapply = (op, tmp) =>
         {
@@ -1909,7 +1927,7 @@ public sealed class PickupTests
     [Fact]
     public void CommandDropAll_Given_an_object_of_a_kind_it_keeps_at_the_head_of_the_pack_When_run_Then_that_object_stays()
     {
-        // Arrange: money, keys, gems, food, an invisible object, a locked sword and an open sack, each in front of a ring that goes (with a container open every drop goes to put_object_in_sack, which is wave 6's: no ring goes to the ground then)
+        // Arrange: money, keys, gems, food, an invisible object, a locked sword and an open sack, each in front of a ring that goes (with a container open every drop goes to put_object_in_sack, lane 6A's: the ring goes into the open sack and none to the ground)
         foreach (string kept in new[] { "goldcoin", "key", "gem", "banana", "mist", "sack", "sword" })
         {
             string extra = kept == "sword" ? "inv_locked 1\n" : kept == "sack" ? "applied 1\n" : "";
@@ -1926,7 +1944,9 @@ public sealed class PickupTests
             // Assert
             Assert.Equal(0UL, r.Status);
             Assert.True((kept == "sack" ? Array.Empty<string>() : new[] { "ring" }).SequenceEqual(Effects(r, "npc.place").Select(p => g.Read(p.Get("handle")!.AsHandle, "mudrealname").AsString)), kept);
-            Assert.True(Lines(r).Count == 0, kept + ": " + string.Join("|", Lines(r))); // nothing said about what stayed
+            Assert.True(
+                (kept == "sack" ? new[] { "You put the rings in sack (open) (active)." } : Array.Empty<string>()).SequenceEqual(Lines(r)),
+                kept + ": " + string.Join("|", Lines(r))); // nothing said about what stayed
         }
     }
 

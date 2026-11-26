@@ -143,6 +143,8 @@ internal sealed partial class Pickup
             return false;
         }
 
+        // an object taken out of a container that lies on the ground leaves the level's file as well
+        Level? held = ground == null ? LevelOf(tmp) : null;
         LevelObject? whole = null; // the level object that becomes the item itself (a whole stack, not a part of it)
         if (nrof != tmpNrof)
         {
@@ -169,6 +171,10 @@ internal sealed partial class Pickup
             {
                 w.Host.EsrvSendItem(pl, tmp2);
             }
+            if (held != null)
+            {
+                From = held;
+            }
         }
         else if (ground != null)
         {
@@ -185,6 +191,10 @@ internal sealed partial class Pickup
                 w.Host.EsrvDelItem(pl.Contr, tmp.Count);
             }
             w.RemoveOb(tmp);
+            if (held != null)
+            {
+                From = held;
+            }
         }
         if (tmp.QueryFlag(Define.FLAG_UNPAID))
         {

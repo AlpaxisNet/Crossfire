@@ -979,7 +979,7 @@ text changed (above).
 | `FixPlayer.Fix(world, op)` | `fix_player(op)` | recomputes everything above from the applied items. `GkHost.FixPlayer` (the hook of every insert and remove) calls it |
 | `LivingChange.ChangeAbil(world, op, item)` | `change_abil(op, item)` | call it **after** `FLAG_APPLIED` of `item` is set (apply: flag 1) or cleared (take off: -1), and after `SkillTable.CheckSkillToApply`. It takes the attack types and paths of a removed item away, runs `Fix`, touches the controller (so the strings follow at the end of the request) and tells the player what changed through `Host.DrawInfo` (so the event `onRPGMessage`, or `client.text`); it returns 1 when anything changed. It does not call `esrv_update_item` for the item: `apply_special` does. A potion changes `Player.OrigStats` and the account's `mudorigstats` line |
 | `SkillTable.CheckSkillToApply(world, who, item)` | `check_skill_to_apply` | readies the skill of a weapon, bow, potion, scroll, rod, wand or horn and sets `Player.ShootType`; 1 on success, 0 otherwise (with "You can't use that!" and the flag cleared) |
-| `SkillTable.ChangeSkill(world, who, skill)` | `change_skill` | calls `SkillTable.ApplySpecial(who, item, AP_APPLY or AP_UNAPPLY)`, which **wave 6B sets** when it ports `apply_special` (return 0 for done, 1 for not done); until it is set a skill that is not the chosen one cannot be readied, and the log says so |
+| `SkillTable.ChangeSkill(world, who, skill)` | `change_skill` | calls `SkillTable.ApplySpecial(who, item, AP_APPLY or AP_UNAPPLY)`, which lane 6B sets (`InitWave6B`) with its port of `apply_special` (return 0 for done, 1 for not done); until it is set a skill that is not the chosen one cannot be readied, and the log says so |
 | `LivingChange.AddStatbonus(op)`, `RemoveStatbonus(op)`, `AllowedClass(op)`, `ChangeAttr(stats, attr, value)` | `add_statbonus`, `remove_statbonus`, `allowed_class`, `change_attr_value` | the player archetype's stat bonus into the stats and the rolled stats (and out again) |
 
 `change_abil` is ported with its messages (without the colour flag `NDI_BLUE` of the resistance lines: `DrawInfo` has no colours). The
@@ -1069,8 +1069,85 @@ then `DropPlaceAt`); a failed query is the request's answer, nothing changed. `t
 
 **For the next waves.** `Dispatcher.PutObjectInSack` (`Func<op, sack, tmp, nrof, bool>`) is what `drop` calls while a container is
 open, and `Dispatcher.ApplySpecialUnapply` (`Func<op, tmp, int>`, zero for unapplied) what `drop_object` calls for an applied object;
-wave 6 sets both (until then nothing is dropped into a container and an applied object stays). `Pickup.SackCanHold` is the port of
+wave 6 sets both: lane 6A sets `PutObjectInSack` in `InitWave6A` ("Containers", below), 6B sets `ApplySpecialUnapply` in `InitWave6B` (at `session.init`), so an applied object is unapplied first, in a drop and in a put into a container; a test that wants the hook missing sets it to null. `Pickup.SackCanHold` is the port of
 `sack_can_hold` for `put_object_in_sack`. A pick up into a container uses `Pickup.PickUp`'s search for an applied container.
+## Containers (lane 6A of wave 6; docs/mud-phase3.md sections 4.2, 4.4 and 5)
+
+The ported C is `Gk/Container.cs` (server/c_object.c `put_object_in_sack`, socket/item.c `esrv_move_object`) and `Gk/ContainerApply.cs`
+(server/apply.c `esrv_apply_container`, server/player.c `find_key`), all members of the partial class `Pickup`; the dispatcher's side is
+`Dispatcher.Wave6A.cs` and `Gk/Manifest.Wave6A.cs`; the tests are `ContainerTests.cs` and `ContainerMoveTests.cs`. The lane has one function, no
+method and no type (ids 8000 to 8999 are free beyond `mudmoveinvobject` = 8000; the test function `t6a` is 8900).
+
+**The three states of a container** (apply.c): *closed* (not applied), *readied* (applied, not open: what matches is put into it when it
+is picked up) and *open* (applied and `op->container` points to it: `Player.Container`, which is `PlayerState.Ob.Container`). Applying a
+closed container readies it, applying a readied one opens it, applying the open one closes it. Opening a container while another is open
+closes the other first, but only when the one that is applied is itself applied (a closed one is only readied, as in C). A locked
+container (`slaying` set) needs a key (`find_key`): "You unlock X with Y." or "You don't have the key to unlock X." and the apply fails.
+A container that lies in another container cannot be opened ("You can't open X"). `manual_apply` answers 1 for both types whatever
+`esrv_apply_container` returned.
+
+**Apply by lane.** `ApplyWave6A(op, tmp, aflag)` answers 1 for `CONTAINER` (122: `esrv_apply_container(op, tmp)`) and `CLOSE_CON` (121:
+the same for `tmp->env`, the container the closer lies in) and null for any other type; an applier that is no player does nothing (C's
+`apply_container` returns 0 for it). The caller (6B's `command_apply` and `mudapplyinvobject`, which is slow) answers busy first: opening and
+closing change the account file (the applied flag). `Dispatcher.ApplyByLane` is the one entry point.
+
+**A container on the ground** is the level object of a level the extension holds (its `CfObject` has no environment; a level object is
+flagged removed all the time). It is opened by the apply of the object (the face's `onApply` and `defaultApply`): `op->container` is
+the object, `WALK_OFF` and `FLY_OFF` are set (and cleared when it is closed), the level is marked to be saved, and the window shows its
+objects with the 1 in field 6. Nothing closes it when the player walks away (C's walk off is not ported: the square is the host's), so
+it stays open until he closes it, logs out or opens another. The id `mud_container` names is the tag of the object's item proxy
+(`ItemProxy`), which `mudmoveinvobject` accepts as `to`; it is no id for `findinvobjectbyid`, which finds only objects of his tree
+(and not the ground container itself). The ground container is never an item of the window: `esrv_update_item` for it does nothing
+(the extension would take it for one of his items and kill its tag at the next flush).
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `mudmoveinvobject` | 8000 | `int`, `int`, `int` | `bool` | a slow function: `ctx.player` moves `count` (0: all) of his item `id` into the container `to`, or out of its container for the window (below); true when it moved; busy before anything changes |
+
+**`mudmoveinvobject(id, to, count)`** (`esrv_move_object`). `id` is an item of the
+request player's own tree (`FindItemById`, deep: also an item of a closed sack; another player's id, a level object's, a dead tag, 0
+and a negative count are false with nothing said). `to`:
+
+| `to` | what happens |
+| --- | --- |
+| 0 or -1, or the tag of the player's own handle (C's `pl->count`) | Graal Kingdoms' "window": the object comes out of its container into the pack: `pick_up` (c_object.c), so into the open container when it is not where the object is, else the best applied container, else the player; "You pick up the X."; false when it is in the pack already. C's `to == 0` (the ground) is `muddropinvobject`'s |
+| the tag of an item of his tree, or of the open container | `esrv_move_object`'s test (`type == CONTAINER`, `can_pick`, `sack_can_hold`, with the texts of C), then `put_object_in_sack` |
+| anything else | false, nothing said |
+
+An item tag wins over the player's own tag (the two are numbers of different kinds that can be equal). `put_object_in_sack` puts the
+count (0: all) into the sack: "You put the X in Y." (C names a stack by its plural without the number, differences.md), merges into a
+stack of the sack, splits a stack for a part, unapplies an applied object first (`ApplySpecialUnapply`, 6B), refuses an object with
+`startequip` ("You cannot put the X in the container."), and for a container that holds objects moves its contents into the open
+container instead (one by one, "Your X fills up." when the next does not fit). The weight of the sack's contents follows `fix_weight`
+(a sack with `Str` 50 carries them at half: `ItemMatching.FixWeight`), the strings by the flush (`FixPlayer` asks for the whole window).
+
+**The files.** A move between two containers of the player's own tree changes his account file only (`Dirty`, written after the
+quiet time). A move that has a container on the ground on either side changes the level's file too and goes through `SubmitMove` like a pick up
+or a drop: out of the ground container into the pack the level is written first, into it the account first; a move inside one ground
+container marks only the level. `Pickup.From` and `Pickup.To` carry the levels to `Dispatcher.FinishMove`, which `drop` (while a container is open:
+`Dispatcher.PutObjectInSack`) and `mudmoveinvobject` both call.
+
+**`mud_container`** (4C's flush, unchanged): `<id>,<name>,<picture>` of the open container, the empty text when none is open; the items
+of the open container carry the 1 and the strings of the items of a container that was closed are deleted; only what changed is
+written. Closed and readied containers are one item string with the flags `a_none` (0) and `a_active` (4); the open one has `F_OPEN` (0x2000)
+too. The open container is not part of an account: after a logout and login the container is readied (applied), not open, and its
+whole tree (nested sacks, stacks, weights) is what was saved.
+
+**Keys.** `Pickup.FindKey(pl, container, door)` is `find_key`: a key in the top level of the player's inventory (type 24 for a door,
+type 21 with the door's `slaying` for anything else, a locked container included); a key inside a container is used only as
+`pl->contr->usekeys` allows. `Pickup.UseKeys` is `key_inventory` for every player (C's default; the command `usekeys` is not ported), so a key in
+a sack "vibrates as you approach the door" and is not used; the other two settings are ported and tested.
+
+**For the next lanes.** 6B's `manual_apply` asks `ApplyByLane` first and needs nothing else of this lane. 6E's e2e of a `restrictaccess`
+container as a level face calls `defaultApply` on the face, which reaches `ApplyWave6A` with the level object's `CfObject`.
+
+**Fix lane of wave 6, containers.** A container on the ground that goes away while a player has it open is closed first, as
+`esrv_apply_container` closes it (the player is told "You close ..."): `level.unload` and the destruction of the object by a script
+do it (`Dispatcher.CloseOpenOn`), so that `Player.Container` never names a freed object and a drop never puts his things into it. Walking
+away from an open ground container is still not ported (docs/differences.md, "Containers"). Whatever leaves a container that lies on the
+ground (`pick_up_object` of an object in it, `take` and `esrv_move_object` alike) sets `Pickup.From` to that level, so the level's
+file is written first and the account's second.
+
 ## The inventory functions (lane 5B)
 
 Docs/mud-phase3.md section 4.2 of the suite is the specification; the code is `Dispatcher.Wave5B.cs`, `Gk/Inventory.cs` (the C: the weight
@@ -1201,3 +1278,91 @@ Money is the coins of a player's tree; examine is the text of C's `examine`. The
   `stats` as `examine_lines`.
 - `command_examine` is ported but no script calls it yet (`mudcommand`, wave 7); the ground of its parameterless form is the objects
   below the player, of which this extension's player has none.
+
+## Apply and wearing (lane 6B of wave 6; docs/mud-phase3.md section 4.4)
+
+The code is `Gk/Apply.cs` (`apply_special`, `manual_apply`, `player_apply`, `check_weapon_power` of server/apply.c), `Gk/ApplyCommand.cs`
+(`command_apply`, `player_apply_below`) and, for the script's side, `Dispatcher.Wave6B.cs`; porting.md lists what is not ported and
+differences.md ("Apply and wearing") says where the extension differs. The ids are the lane's (functions 9100, methods 9000 and 9500).
+
+| Function | Id | Parameters | Returns | What it does |
+| --- | --- | --- | --- | --- |
+| `mudapplyinvobject` | 9100 | `int` | `bool` | a slow function: `ctx.player` applies the item of his own tree with that id (deep: also from a sack). The player event `onApplyItem(item)` first, then `player_apply`, which sends the item event `onApply` (below); true when `manual_apply` answered 1. False for an id that is no item of his tree; busy before anything changes |
+
+| Method | Id | Parameters | Returns | What it does |
+| --- | --- | --- | --- | --- |
+| `apply` | 9000 | none | `bool` | a method of `TMudObject`: the same as `mudapplyinvobject` for the item that is the receiver (an item of the actor's own tree) or an object on a level the actor applies; false for an item of another tree. Busy first |
+| `mudapplyobject` | 9001 | none | `bool` | the same method under GK's name for an object of a level |
+| `defaultApply` | 9002 | `handle:TMudPlayer` | `int` | `manual_apply`'s switch without the script's hook for the player the argument is (the request's player for none): wields, wears, readies, or asks the lane that owns the type (`Dispatcher.ApplyByLane`); the answer is `manual_apply`'s 0, 1 or 2, with the lines `player_apply` says for 0 and 2. This is what the fallback of `onApply` invokes. Busy first |
+| `applyinvobject` | 9500 | `int` | `bool` | a method of `TMudPlayer`: `mudapplyinvobject` for the receiver |
+| `getwieldedobject` | 9501 | none | `handle:TMudObject` | the item the player has applied as his weapon (`current_weapon`: a weapon, a tool), nil for bare hands |
+
+| Event | Target | Mode | Parameters | When |
+| --- | --- | --- | --- | --- |
+| `onApplyItem` | player | sync | `handle:TMudObject` | at the start of `mudapplyinvobject` and its kin, with the item, always (also for an item the apply refuses) |
+| `onApply` | item | sync | `handle:TMudPlayer` | from `manual_apply` (after its checks for unpaid objects): on the item's proxy, `classes` the one class of its type (`mudtype_<name>`, else `mudtype_general`), `args` the player, `fallback` the invoke of `defaultApply` with the player. Not sent on a link of 1.0 and for `apply -a` and `apply -u` |
+| `onApply` | object | sync | `handle:TMudPlayer` | the same name for an object that lies on a level (`mudapplyobject`, `apply` of the face), sent to the NPC that shows it (no `classes`: the face has joined its own), `args` the player, `fallback` the invoke of `defaultApply` on the object with the player. Not sent on a link of 1.0 (the switch runs at once) |
+| `onWeaponWielded`, `onWeaponUnWielded` | player | sync | `handle:TMudObject` | after a weapon or a tool is applied or taken off |
+| `onWandReadied`, `onWandUnReadied` | player | sync | `handle:TMudObject` | after a wand is readied or taken off |
+| `onArmorWorn`, `onArmorUnWorn` | player | sync | `handle:TMudObject` | after armour, a helmet, shield, boots, gloves, girdle, bracers, cloak, ring or amulet is put on or taken off |
+| `onClothWorn`, `onClothUnWorn` | player | sync | `handle:TMudObject` | after a mask, legs or a body (types 164 to 166) is put on or taken off |
+
+The order of what a script sees for `mudapplyinvobject(id)` on a sword: the event `onApplyItem`, then `onApply` (the host runs the class
+function, or the fallback `defaultApply`); in the request of `defaultApply` the lines of text (`onRPGMessage`), the hook
+`onWeaponWielded`, and in the same reply the strings `mud_wc`, `mud_dam`, `mud_ac` and `mud_speed` and the item's own string
+(`apply_special` runs `fix_player`, and `change_abil` touches the controller, so the flush writes them at the end of the request).
+
+**Setup.** `InitWave6B` sets `Dispatcher.ApplySpecialUnapply` (lane 5A's `drop_object`: an applied object is unapplied with
+`AP_UNAPPLY | AP_NO_MERGE` before it is dropped, so its hook is sent and a cursed one cannot be dropped) and `gk.Skills.ApplySpecial`
+(lane 5D's `change_skill` readies a skill through `apply_special`).
+
+**Not available yet.** Scrolls, spell books, skill scrolls, rods, horns, skill tools, the improvers, the clock, the shop menu, the power
+crystal, the save bed and exits answer "That is not available yet." and are not used up; levers and handles do nothing (porting.md).
+
+## Consumables (lane 6C of phase 3, wave 6)
+
+`Gk/Consumable.cs` is `server/apply.c`'s `apply_food`, `eat_special_food`, `dragon_eat_flesh`, `apply_poison` and `apply_potion`, with
+every `new_draw_info` as `CrossfireHost.DrawInfo`, `fix_player` as `CrossfireHost.FixPlayer` and the use of an object as
+`CfWorld.DecreaseObNr` (which tells the client and fixes the player; the strings of the window follow at the end of the request through
+`Player.Touch()`). `Dispatcher.ApplyWave6C` (`Dispatcher.Wave6C.cs`) is the part of `manual_apply` for the types DRINK, FOOD, FLESH,
+POISON and POTION (`Dispatcher.ApplyByLane` asks it; it answers 1 for them, null for any other type). The lane has no function and no
+method of its own, so it has no id in its ranges; its callers (6B's `apply`, `mudapplyinvobject`; 7A's commands) are slow or
+`CheckBusy()` first, so nothing here changes while the worker is busy. For a potion `manual_apply`'s skill check runs first
+(`SkillTable.CheckSkillToApply` with `FLAG_APPLIED` set and cleared around it, as C does).
+
+- **A potion of strength and its kind** go through `LivingChange.ChangeAbil`: `Player.OrigStats` and the object's stats change, the line
+  `mudorigstats` is stored (`StoreStats`) and the player is told ("You feel stronger."); "Nothing happened." when the stat is at its
+  natural maximum (the potion is used up, as in C). The potion is identified first (`identify`) when it is not.
+- **The improvement potion** (`attacktype` god power) raises (cursed: lowers to 1) the first of the points per level below the player's
+  level (`Player.LevHp`, `LevSp`, `LevGrace`) and stores the three lines (`mudlevhp`, `mudlevsp`, `mudlevgrace`).
+- **The potion of restoration** removes the `depletion` force with a line for each stat it took, or says "You feel a great loss...".
+- **What is not available** (spell potions, cursed restoration, protection potions; food that changes stats or protects) says "That is
+  not available yet." and a potion stays in the pack: docs/differences.md "Consumables".
+- **A dragon** (`CfWorld.IsDragonPl`: the archetype's race is `dragon`) that has the forces `dragon_skin_force` and
+  `dragon_ability_force` eats flesh by `dragon_eat_flesh`: the skin's resistance may rise by one (the dice are `CfWorld.Random`), the ability
+  focus may change. A dragon without the forces eats it as a normal player.
+- **The player event `onEatFood(foodarch, food, wascursed)`** (`Manifest.EventOnEatFood`, `handle:TMudArch`, `handle:TMudObject`, `int`;
+  a 1.1 key) follows the state change of a player's food, drink or flesh, after the object is used up; it is not sent on a 1.0 link.
+
+**Fix lane of wave 6, consumables on the ground.** What `ApplyWave6C` applies of an object that lies on a level (`mudapplyobject`,
+the face's `apply`) is used up of its face too: the last one frees the object, kills the face's handle, removes its NPC (`npc.remove`) and
+marks the level dirty; one of a stack marks the level dirty and sends `onUpdateObject` (`Dispatcher.UsedUpOnGround`). Food that needs
+`cast_change_attr` (a stat or a protection) says "That is not available yet." and is not eaten.
+
+## Signs, books, lighters and chests (lane 6D of phase 3, wave 6)
+
+Lane 6D owns the cases of C's `manual_apply` for `SIGN`, `BOOK`, `LIGHTER` and `TREASURE` and Graal Kingdoms' types 160 and 161
+(`Dispatcher.ApplyWave6D`, asked by lane 6B's switch through `ApplyByLane`; it answers null for any other type). It declares no
+function, method or event of its own. The ported C is `Gk/Readable.cs` (`apply_sign`, `apply_book`, `SK_level`), `Gk/Lighter.cs`
+(`apply_lighter`, `did_make_save_item` and `save_throw_object` for fire) and `Dispatcher.Wave6D.cs` (`apply_treasure`). Tested in
+`ReadableTests.cs` (the test function `t6dapply`, operation 11900, asks `ApplyByLane` for an item id or a level object's handle). The
+caller answers `busy` before it changes anything (the apply entry points of lane 6B); the apply itself marks the account or the level
+dirty.
+
+| Type | What it does (the lines are `DrawInfo`, one call per C `new_draw_info`) | Returns |
+| --- | --- | --- |
+| `SIGN` | "Nothing is written on it."; a counter (`stats.food`) lets it be read that many times (`last_eat`), then "You cannot read it anymore." (silent for a magic mouth: `walk_on` or `fly_on`); "You are unable to read while blind." (not for a wizard or a magic mouth, and the reading is counted all the same); else the message | 1, for monsters too |
+| `BOOK` (a player) | blind: "You are unable to read while blind."; no message: "You open the X and find it empty."; no skill literacy (`ChangeSkill`): "You are unable to decipher the strange symbols."; the book's level above `SK_level + 5` (a wizard reads on): six lines from "just barely" to "totally beyond your comprehension"; else "You open the X and start reading." and the message. No experience, no identification | 1; 0 for a monster |
+| `LIGHTER` (a player) | the marked object is the one to light: "You need to mark a lightable object."; a lighter with charges (`last_eat` and `stats.food`) loses one (one lighter of a stack is split off); "You attempt to light the X with a used up Y."; the object's saving throw against fire: "You light the X with the Y." (a glowing object becomes its `other_arch`, any other loses a random part and a `burnout` comes) or "... and fail." | 1; 0 for a monster |
+| `TREASURE` (a player) | a chest with contents puts each at the player's feet ("You find X in the chest."), then the empty chest goes; "The chest was empty." for an empty one (it goes too). A chest nobody filled is filled first (docs/differences.md). "You can't drop that here." and no change when there is no level at his feet | 1; 0 for a monster |
+| 160, 161 | "You can't apply that." | 1 |
