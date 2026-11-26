@@ -1889,6 +1889,29 @@ public sealed class PickupTests
     }
 
     [Fact]
+    public void CommandDropAll_Given_an_open_container_When_run_Then_the_container_itself_is_not_put_into_itself_but_the_rest_is_offered_to_it()
+    {
+        // Arrange
+        using var g = new Game(inventory: "arch sack\napplied 1\nend\narch ring\nend\n");
+        Feet(g);
+        ulong sack = g.Items(g.Player).Single(i => i.Name.StartsWith("sack", StringComparison.Ordinal)).Handle;
+        g.Ext.Call(ItemWorld.OpDo, new[] { S("open"), S("bob"), Val.Int((uint)sack) }, player: "bob");
+        var offered = new List<string>();
+        g.Ext.Dispatcher.PutObjectInSack = (op, container, tmp, nrof) =>
+        {
+            offered.Add(tmp.Name ?? "");
+            return true;
+        };
+
+        // Act
+        ReplyFrame r = g.Command("dropall", null);
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.Equal(new[] { "ring" }, offered);
+    }
+
+    [Fact]
     public void CommandDropAll_Given_an_applied_ring_When_misc_is_dropped_and_apply_works_Then_the_applied_one_stays()
     {
         // Arrange

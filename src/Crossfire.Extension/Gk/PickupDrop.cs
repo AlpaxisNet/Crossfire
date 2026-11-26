@@ -97,13 +97,8 @@ internal sealed partial class Pickup
             return false;
         }
 
+        // a number larger than what the object has fails in get_split_ob with its text ("There are only N <name>s.")
         long have = tmp.Nrof != 0 ? tmp.Nrof : 1;
-        if (nrof > have)
-        {
-            // get_split_ob's own text, also for an object that is not a stack (C would split one off an object of nrof 0 and fail)
-            Say(op, "There are only " + have + " " + tmp.Name + "s.");
-            return false;
-        }
         if (nrof == have)
         {
             nrof = 0; // the whole stack: Alpaxis's reading of C's "nrof && tmp->nrof != nrof" for an object that is no stack

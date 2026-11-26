@@ -247,7 +247,7 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
 - **`drop_object` with a number for an object that is no stack.** C's test `nrof && tmp->nrof != nrof` sends `muddropinvobject(id, x, y, 1)`
   of a sword (`nrof` 0) to `get_split_ob`, which answers "There are only 1 swords."; a script that drops a count of one would never
   drop a sword. A number equal to what the object has (`nrof`, or 1 for an object that is no stack) is the whole object here; a
-  larger number says "There are only N <name>s." and changes nothing, as C's `get_split_ob` does for a stack.
+  larger number goes to `get_split_ob`, which says "There are only N <name>s." and changes nothing.
 - **A negative number** (the script's `n` of `mudpickupobject` or `muddropinvobject`) changes nothing and answers false; C's count is
   unsigned.
 - **A drop on a level the extension does not hold** (a group or single-player level, a position in no segment of a gmap, a level that
