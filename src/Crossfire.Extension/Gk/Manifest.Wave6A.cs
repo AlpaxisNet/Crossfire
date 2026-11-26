@@ -7,8 +7,14 @@ namespace Crossfire.Extension;
 
 internal static partial class Manifest
 {
+    /// <summary>The operation of the function <c>mudmoveinvobject</c>: <c>ctx.player</c> moves an item of his tree into a container of it or out of one.</summary>
+    public const int OpMudMoveInvObject = 8000;
+
     /// <summary>The functions, types and events of lane 6A; <paramref name="b"/> refuses an id outside <see cref="Lane.Wave6A"/>.</summary>
     private static void RegisterWave6A(ManifestBuilder b)
     {
+        // slow: it moves an item, so it answers busy before it changes anything and a late reply is applied (docs/mud-phase3.md section 3, rule 10)
+        b.AddFunction(Lane.Wave6A, new FunctionDef(OpMudMoveInvObject, "mudmoveinvobject", new[] { "int", "int", "int" }, "bool",
+            Slow: true, Handler: (d, args) => d.MudMoveInvObject(args)));
     }
 }
