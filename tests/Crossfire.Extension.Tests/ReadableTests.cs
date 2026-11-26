@@ -106,6 +106,7 @@ public sealed class ReadableTests
                 return 0;
             };
             Feet();
+            Assert.Equal(0UL, Ext.Call(3).Status); // what login made dirty is written: a file that changes now is changed by the apply
         }
 
         public DirectExt Ext { get; }
@@ -532,12 +533,14 @@ public sealed class ReadableTests
         g.Control.MarkCount = g.Item("torch").Count;
         Strong(g);
         Roll(g, 0);
+        g.Control.WeightLimit = 0;
 
         // Act
         ReplyFrame r = g.Apply(lighter);
 
         // Assert
         Assert.Equal(new[] { "You light the torch with the lighter." }, Lines(r));
+        Assert.NotEqual(0, g.Control.WeightLimit); // fix_player ran: it sets the weight limit
         Assert.Equal(new[] { "lighter", "lit torch" }, g.Names()); // a torch that glows is replaced by its other_arch: no burnout
         Assert.Equal(2, lighter.Stats.Food);
         Assert.True(g.Item("lit torch").QueryFlag(Define.FLAG_IDENTIFIED)); // made by NewItem
@@ -605,7 +608,7 @@ public sealed class ReadableTests
     public void ApplyLighter_Given_a_stack_of_lighters_with_charges_When_applied_Then_one_is_split_off_and_loses_the_charge()
     {
         // Arrange
-        using var g = new Game("arch lighter\nnrof 3\nlast_eat 1\nfood 4\nend\narch torch\nend\n");
+        using var g = new Game("arch lighter\nnrof 2\nlast_eat 1\nfood 4\nend\narch torch\nend\n");
         CfObject stack = g.Item("lighter");
         g.Control.Mark = g.Item("torch");
         g.Control.MarkCount = g.Item("torch").Count;
@@ -625,7 +628,7 @@ public sealed class ReadableTests
                 lighters.Add(c);
             }
         }
-        Assert.Equal(new[] { (2u, 4), (1u, 3) }, lighters.Select(l => (l.Nrof, (int)l.Stats.Food)).OrderByDescending(t => t.Item1));
+        Assert.Equal(new[] { (1u, 4), (1u, 3) }, lighters.Select(l => (l.Nrof, (int)l.Stats.Food)).OrderByDescending(t => t.Item2));
     }
 
     [Fact]
@@ -654,7 +657,7 @@ public sealed class ReadableTests
         g.Control.Mark = g.Item("paper");
         g.Control.MarkCount = g.Item("paper").Count;
         Strong(g);
-        Roll(g, 0, 0);
+        Roll(g, 0, 5); // 5 % 5: nothing (a range one too large would take 5 % 6 = 5, all of them)
 
         // Act
         ReplyFrame r = g.Apply(g.Item("lighter"));
@@ -662,6 +665,24 @@ public sealed class ReadableTests
         // Assert: C's save_throw_object decreases by rndm(0, nrof - 1) and puts the burnout in any case
         Assert.Equal(new[] { "You attempt to light the paper with the lighter and fail." }, Lines(r));
         Assert.Equal(new[] { "burnout", "lighter", "paper x5" }, g.Names());
+    }
+
+    [Fact]
+    public void ApplyLighter_Given_two_papers_that_burn_When_lit_Then_one_of_them_burns()
+    {
+        // Arrange
+        using var g = new Game("arch lighter\nend\narch paper\nnrof 2\nend\n");
+        g.Control.Mark = g.Item("paper");
+        g.Control.MarkCount = g.Item("paper").Count;
+        Strong(g);
+        Roll(g, 0, 1); // rndm(0, 1) of 1
+
+        // Act
+        ReplyFrame r = g.Apply(g.Item("lighter"));
+
+        // Assert: a stack of two is a stack
+        Assert.Equal(new[] { "You light the paper with the lighter." }, Lines(r));
+        Assert.Equal(new[] { "burnout", "lighter", "paper" }, g.Names());
     }
 
     [Fact]
@@ -901,6 +922,19 @@ public sealed class ReadableTests
             var face = (LevelObject)g.Ext.Dispatcher.HandlesOfTests.Resolve(place.Get("handle")!.AsHandle)!;
             Assert.True(face.Ob.QueryFlag(Define.FLAG_IDENTIFIED)); // made by the engine: identified
         }
+    }
+
+    [Fact]
+    public void ApplyTreasure_Given_a_chest_with_a_list_that_holds_something_When_applied_Then_only_that_comes_out()
+    {
+        // Arrange: a chest read from a file keeps what the file says
+        using var g = new Game("arch chest\narch sword\nnrof 1\nend\nend\n");
+
+        // Act
+        ReplyFrame r = g.Apply(g.Item("chest"));
+
+        // Assert
+        Assert.Equal(new[] { "You find sword in the chest." }, Lines(r));
     }
 
     [Fact]

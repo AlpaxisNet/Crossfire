@@ -1201,3 +1201,21 @@ Money is the coins of a player's tree; examine is the text of C's `examine`. The
   `stats` as `examine_lines`.
 - `command_examine` is ported but no script calls it yet (`mudcommand`, wave 7); the ground of its parameterless form is the objects
   below the player, of which this extension's player has none.
+
+## Signs, books, lighters and chests (lane 6D of phase 3, wave 6)
+
+Lane 6D owns the cases of C's `manual_apply` for `SIGN`, `BOOK`, `LIGHTER` and `TREASURE` and Graal Kingdoms' types 160 and 161
+(`Dispatcher.ApplyWave6D`, asked by lane 6B's switch through `ApplyByLane`; it answers null for any other type). It declares no
+function, method or event of its own. The ported C is `Gk/Readable.cs` (`apply_sign`, `apply_book`, `SK_level`), `Gk/Lighter.cs`
+(`apply_lighter`, `did_make_save_item` and `save_throw_object` for fire) and `Dispatcher.Wave6D.cs` (`apply_treasure`). Tested in
+`ReadableTests.cs` (the test function `t6dapply`, operation 11900, asks `ApplyByLane` for an item id or a level object's handle). The
+caller answers `busy` before it changes anything (the apply entry points of lane 6B); the apply itself marks the account or the level
+dirty.
+
+| Type | What it does (the lines are `DrawInfo`, one call per C `new_draw_info`) | Returns |
+| --- | --- | --- |
+| `SIGN` | "Nothing is written on it."; a counter (`stats.food`) lets it be read that many times (`last_eat`), then "You cannot read it anymore." (silent for a magic mouth: `walk_on` or `fly_on`); "You are unable to read while blind." (not for a wizard or a magic mouth, and the reading is counted all the same); else the message | 1, for monsters too |
+| `BOOK` (a player) | blind: "You are unable to read while blind."; no message: "You open the X and find it empty."; no skill literacy (`ChangeSkill`): "You are unable to decipher the strange symbols."; the book's level above `SK_level + 5` (a wizard reads on): six lines from "just barely" to "totally beyond your comprehension"; else "You open the X and start reading." and the message. No experience, no identification | 1; 0 for a monster |
+| `LIGHTER` (a player) | the marked object is the one to light: "You need to mark a lightable object."; a lighter with charges (`last_eat` and `stats.food`) loses one (one lighter of a stack is split off); "You attempt to light the X with a used up Y."; the object's saving throw against fire: "You light the X with the Y." (a glowing object becomes its `other_arch`, any other loses a random part and a `burnout` comes) or "... and fail." | 1; 0 for a monster |
+| `TREASURE` (a player) | a chest with contents puts each at the player's feet ("You find X in the chest."), then the empty chest goes; "The chest was empty." for an empty one (it goes too). A chest nobody filled is filled first (docs/differences.md). "You can't drop that here." and no change when there is no level at his feet | 1; 0 for a monster |
+| 160, 161 | "You can't apply that." | 1 |

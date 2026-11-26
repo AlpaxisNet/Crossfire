@@ -311,3 +311,31 @@ functions").
   extension knows nothing of gives no effects; the extension still takes the first `level.load` of a name as the host's announcement of
   that level, so that `muddropinvobject` can place an object in a level where nothing has ever been made. Without it, the first drop in
   every level that has no seed was refused ("You can't drop that here."). Nothing is written for such a level until it holds an object.
+
+## Signs, books, lighters and chests (`Gk/Readable.cs`, `Gk/Lighter.cs`, `Dispatcher.Wave6D.cs`; lane 6D of phase 3)
+
+- **A book gives no experience and is not marked.** C's `apply_book` gives experience for the first reading (`calc_skill_exp`, `add_exp`),
+  identifies the book and sets `FLAG_NO_SKILL_IDENT` so that it gives none again. Phase 3 has no experience: the text is shown and the
+  book stays as it is, so that a later phase gives the experience once. C's `apply_book` of this version teaches no spell (that is
+  `apply_spellbook`, a spell item of a later phase), so there is no "not available yet" branch in it. The skill literacy is needed as in
+  C: a player whose pack has no literacy skill (and whose `apply_special` can not ready it) gets "You have no knowledge of literacy." and
+  "You are unable to decipher the strange symbols.".
+- **Colours.** C writes a sign's and a book's text with `NDI_NAVY`; `DrawInfo` has no colour, so the text goes uncoloured.
+- **A lighter** is C's, with the saving throw of `attack.c` for fire (`did_make_save_item`, `save_throw_object`) as far as an object of an
+  inventory reaches it: the marked object always has an environment and no map, so `stop_item`, the cold, cancellation and map
+  branches of `save_throw_object` are not ported. Things it makes (the `other_arch` of a glowing object, the `burnout`) are made by
+  `Dispatcher.NewItem` (identified); an archetype that does not exist gives C's singularity. C's `lighter->nrof -= 1` of a split stack
+  does not change the weight carried; neither does the port (the next `fix_weight` does).
+- **A chest nobody filled gets its treasure at the first apply.** C fills a chest when its map is loaded the first time
+  (`fix_auto_apply`: `create_treasure(randomitems)`, `stats.hp` times), and a chest made later is empty ("The chest was empty." and
+  gone). The chests of this extension are made by `NewItem` at any time, so the first apply of a chest that has no contents, has a
+  treasure list and is not a template (`FLAG_AUTO_APPLY`) makes them (difficulty of the level it lies in, 14 in a pack, as
+  `auto_apply`), identified, with `stats.hp` counted down as C does. A chest read from a file keeps what the file says.
+- **The contents come out at the player's feet**, as a drop's do (`player.pos`, then the level the extension holds there), each as a new
+  level object (never merged), without `mudowner` (C sets none). When the extension holds no level there, or the host does not answer
+  the query, nothing changes and the player is told "You can't drop that here." (a drop's text, docs/mud-phase3.md section 3, rule 8).
+  The level's limit of objects is checked once, before the first thing comes out, so a chest may take a level a few objects over it. A
+  move from a pack to a level goes through `SubmitMove` (account first); a chest on the ground in another level than the feet goes level
+  to level.
+- **The trap of a chest** (C springs a `RUNE` found in it) is not ported (traps are phase 4).
+- **Types 160 (furniture) and 161 (house doors)** answer "You can't apply that." (housing is not phase 3). C has no such types.
