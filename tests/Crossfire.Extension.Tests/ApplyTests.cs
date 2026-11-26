@@ -179,7 +179,7 @@ internal static class ApplyWorld
     };
 }
 
-public sealed class ApplyTests
+public sealed partial class ApplyTests
 {
     private sealed class Game : IDisposable
     {

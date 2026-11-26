@@ -21,6 +21,41 @@ internal sealed partial class Dispatcher
     /// </summary>
     private partial int? ApplyWave6C(CfObject op, CfObject tmp, int aflag)
     {
+        // an object on the ground is a face of its level: what the apply used up of it is used up of the face too
+        LevelObject? face = GroundOf(tmp);
+        uint tag = tmp.Count;
+        uint before = tmp.Nrof;
+        int? answer = ApplyConsumable(op, tmp);
+        if (face != null && answer != null)
+        {
+            UsedUpOnGround(face, tmp, tag, before);
+        }
+        return answer;
+    }
+
+    /// <summary>
+    /// <c>decrease_ob</c> freed the object of a face of a level, or took one from its stack: the face goes with the last one (its
+    /// handle is dead, the script's object is removed, the level is saved without it), a stack that is smaller is saved and told to the
+    /// script as any change of a ground stack is.
+    /// </summary>
+    private void UsedUpOnGround(LevelObject face, CfObject tmp, uint tag, uint before)
+    {
+        if (CfWorld.WasDestroyed(tmp, tag))
+        {
+            effects.Add(Val.Map(("k", Val.Str("npc.remove")), ("handle", Val.Handle(handles.HandleOf(face)))));
+            face.Dead = true;
+            face.Level.Objects.Remove(face);
+            face.Level.Dirty = true;
+            handles.Kill(face);
+        }
+        else if (tmp.Nrof != before)
+        {
+            GroundChanged(face);
+        }
+    }
+
+    private int? ApplyConsumable(CfObject op, CfObject tmp)
+    {
         CfWorld w = world!;
         switch (tmp.Type)
         {
