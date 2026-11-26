@@ -885,6 +885,7 @@ public sealed class PickupTests
         var asked = new List<string>();
 
         // Act
+        g.Ext.Dispatcher.ApplySpecialUnapply = null; // lane 6B sets it at session.init: this test is for a dispatcher without apply code
         ReplyFrame without = g.Drop(sword, 1, 1, 0);
         g.Ext.Dispatcher.ApplySpecialUnapply = (op, tmp) =>
         {

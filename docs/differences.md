@@ -262,7 +262,7 @@ These are choices of Alpaxis, not of Crossfire, and they are in the extension (`
   has the most objects it may) answers false and "You can't drop that here." before anything changes (docs/mud-phase3.md section 3, rule 8).
 - **`mudowner`** of a dropped object is the dropping player's account (C has no such field: its `owner` would keep the object out of the
   level file, docs/mud-phase3.md section 3, rule 5).
-- **An applied object is not dropped** until wave 6 sets `Dispatcher.ApplySpecialUnapply` (C calls `apply_special` to unapply it first);
+- **An applied object is unapplied before it is dropped** through `Dispatcher.ApplySpecialUnapply`, which lane 6B sets (C calls `apply_special`); a cursed one stays. Without that hook (a dispatcher that did not run `session.init`) an applied object is not dropped;
   a drop into an open container is `Dispatcher.PutObjectInSack` (lane 6A, "Containers" below).
 - **The square of `command_take`** is the level's objects whose tile is the player's (the position from the query `player.pos`),
   the one placed last first; C's chain `op->below`. An object that no `level.load` has shown to the host yet is not on the square.
@@ -340,3 +340,43 @@ functions").
   extension knows nothing of gives no effects; the extension still takes the first `level.load` of a name as the host's announcement of
   that level, so that `muddropinvobject` can place an object in a level where nothing has ever been made. Without it, the first drop in
   every level that has no seed was refused ("You can't drop that here."). Nothing is written for such a level until it holds an object.
+
+## Apply and wearing (`Gk/Apply*.cs`, `Dispatcher.Wave6B.cs`; lane 6B of phase 3)
+
+- **The plugin hook of `manual_apply` is the script's `onApply`.** C asks the object's plugin and, if it answers non-zero, does nothing
+  more. Here the extension sends the player event `onApplyItem` (always, with the item) and the item event `onApply` on the item's proxy
+  with the invoke of `defaultApply` as its `fallback`; the host runs the class function, which usually calls `this.defaultApply(pl)`,
+  and runs the fallback when the class has none (docs/mud-phase3.md section 4.4). `manual_apply` answers 1 at once: the script decides
+  later, in a request of its own. On a link of 1.0 (no item events, no `fallback`) the switch runs at once. `apply -a` and `apply -u`
+  (`command_apply`) also run at once: the fallback carries no flag.
+- **An object on the ground has no `onApply` event.** The manifest gives one name one target, and `onApply` is the item's; GK's faces
+  would need it on the NPC (target `object`) as well. `mudapplyobject` of a level object runs `defaultApply` at once (the first line of
+  the object's own `onApply`, for example a restricted chest's, is not asked). This is open: it needs a second event name or a host that
+  runs one event on both targets (reported to the lead).
+- **`defaultApply(pl)` says what `player_apply` says.** Its answer is `manual_apply`'s (0, 1 or 2), and for 0 and 2 it says "I don't know
+  how to apply the X." and "You must get it first!", which C's `player_apply` says after the switch.
+- **Applies that need code that is not here do not use the object up.** Scrolls, spell books, skill scrolls, rods, horns, skill tools,
+  the improvers, the clock, the shop menu, the power crystal, the save bed and exits say "That is not available yet." and answer 1
+  (told). Handles and triggers do nothing and answer 1 (docs/mud-phase3.md section 4.4; the map's buttons are not here). Furniture (160)
+  and house doors (161, unless lane 6D answers) say "You can't apply that.".
+- **Graal Kingdoms' types.** 162 and 163 (tools) are wielded in the place of the weapon: wielding one takes a wielded weapon or tool
+  off and the other way round, they set `current_weapon` (so `getwieldedobject` names them) and need `can_use_weapon` and
+  `check_weapon_power` like a weapon, but no skill. 164 to 166 (mask, legs, body) are worn, one per type, like armour but without
+  `can_use_armour` (clothes are not armour). Both are [I]: nothing shows what Graal Kingdoms' own server did.
+- **A weapon's refused wield gives the part of a stack back.** C's `apply_special` splits `nrof - 1` off a stack before it checks the
+  skill, and `return 1` after a failed `check_skill_to_apply` leaves the split-off object in no inventory (it is lost). Here it goes back
+  into the player's inventory, as it does for the other refusals.
+- **The hooks after a change.** `onWeaponWielded`/`UnWielded` (weapons, tools), `onWandReadied`/`UnReadied`, `onArmorWorn`/`UnWorn`
+  (the armour types, rings and amulets) and `onClothWorn`/`UnWorn` are player events with the item as typed argument, sent after the
+  flag `applied` is set or cleared and after `fix_player` (so `getwieldedobject` and the strings are right); the unapply of the rival
+  of a slot sends its hook first, and a taken-off object that merged into a stack gives the stack as the argument. Bows, rods, horns and
+  skills have no hook (`mudplayers` declares none). On a link of 1.0 none is sent.
+- **The class of an item's type** (`GkSettings.MudTypeName`, `GkClasses.MudTypeClass`) is `mudtype_<name>` when the world has that class,
+  else `mudtype_general`. The names are Crossfire's (`weapon`, `potion`, `container`, `sign`, `book`, `scroll`, `skill`, `treasure`,
+  `lighter`, `poison`, ...) and the names of Graal Kingdoms' own files (`fireweapon` for a bow, `cfhandle`, `powercrystal`,
+  `armourimprover`, `weaponimprover`, `skillscroll`); rings and amulets are `armour`; flesh and drink are `food` [G]; 161 is
+  `housedoor`, 162 and 163 `tool`, 164 to 166 `cloth`. The other armour types (helmet, shield, boots, gloves, girdle, bracers, cloak)
+  have no class of their own and use the general one, as the rule says; whether Graal Kingdoms' own server sent them to `armour` is
+  not known.
+- **The unapply of a dropped object and of a skill.** `Dispatcher.ApplySpecialUnapply` (lane 5A's `drop_object`) and
+  `SkillTable.ApplySpecial` (lane 5D's `change_skill`) are set at `session.init` and call `apply_special`.
