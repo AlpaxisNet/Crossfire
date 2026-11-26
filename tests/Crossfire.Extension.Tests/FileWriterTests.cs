@@ -723,6 +723,7 @@ public class FileWriterTests
         });
         writer.Submit("a.txt", Bytes("x"));
         Assert.True(WaitFor(() => Volatile.Read(ref failures) >= 5, 20_000)); // the tries are 0.2, 0.4, 0.8 and 1.6 s apart: the next one is 3.2 s away
+        Thread.Sleep(300); // the writer records the failure of that pass just after the hook threw: a recovery before it would be recorded as a failure of the forced write
         Volatile.Write(ref broken, false);
 
         // Act
