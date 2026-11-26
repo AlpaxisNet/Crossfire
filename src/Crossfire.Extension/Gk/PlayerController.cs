@@ -93,7 +93,7 @@ internal sealed class ShownTable
 /// player's object; <c>player.logout</c> takes it away again. The fields are those that phase 3's functions read or write (port-map
 /// group A); the types are those of player.h.
 /// </summary>
-internal sealed class Player : IPlayerHandle
+internal sealed partial class Player : IPlayerHandle
 {
     private readonly Action<Player> touched;
 

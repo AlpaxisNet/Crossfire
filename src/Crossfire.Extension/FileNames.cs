@@ -21,6 +21,9 @@ internal static class FileNames
 
     public const string LevelFolder = "levels";
     public const string AccountFolder = "accounts";
+
+    /// <summary>The folder of the copies <c>backupmudaccount</c> makes (relative to the data folder).</summary>
+    public const string BackupFolder = "backups";
     public const string LevelSuffix = ".map";
     public const string AccountSuffix = ".txt";
 

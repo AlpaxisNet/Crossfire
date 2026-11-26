@@ -170,3 +170,24 @@ Graal Kingdoms' `mudlevels` files are Crossfire's map format with these differen
   keyword (`EVENT_STOP`, `EVENT_CLOCK`...) it writes the previous event line again.
 - `set_owner` loops for ever when two objects own each other and their counts match; only a freed and reused object (counts differ)
   ends it. C's comment says so; the port does not add a guard.
+
+## The start path (`Crossfire.Extension/Gk`)
+
+- **`fix_player` is partly ported** (`FixPlayer.Fix`): the stats, the three life values and the weight limit. A player whose stats were
+  never rolled (an account of this extension from before the start path) is left as its file has it: C always has `orig_stats` and
+  the level arrays, the extension has them only after `roll_stats` (kept as the lines `mudorigstats`, `mudlevhp`, `mudlevsp` and
+  `mudlevgrace` of the account file).
+- **`give_initial_items` takes the list as an argument** and tests that: C tests `pl->randomitems` and uses `items`; here the player
+  archetype has no `randomitems` and the class does.
+- **`init_player_exp`**: for a player that has some of the experience objects but not all, C's loop reads past its array and adds copies
+  without end; the port adds each missing object once. For more objects than categories it logs and adds none.
+- **`link_player_skills`** gives up with an error when the player still has the wrong number of experience objects after
+  `init_player_exp` (C calls itself again without end for more objects than categories). A skill number outside the table is a skill
+  with no category (C reads past the table).
+- **`init_exp_obj`**: C exits when the world has no experience archetype or more than seven; the port logs the error and goes on
+  with none, or with the first seven.
+- **`player_lvl_adj`** has no dragon part and no messages; `add_exp` has the 0-experience branch only.
+- **`setmudclass`, `mudresetplayer` and the account methods** are Alpaxis's own: GK's original is not available (docs/mud-phase3.md
+  section 4.7 gives its source). Alpaxis's choices: `mudclass` is the class name without `_class`; choosing a class again takes the
+  first choice's items out; `mudresetplayer` clears `mudclass`; `loadmudaccount` with a suffix fails when the file is missing;
+  `backupmudaccount` writes `backups/<file>.<UTC time>.txt`; the methods answer a bool where a script might test them.

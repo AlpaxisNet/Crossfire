@@ -176,7 +176,8 @@ internal sealed class ManifestBuilder
         foreach (Val m in t.Map.Get("members")!.Items.Concat(t.Map.Get("methods")!.Items))
         {
             long id = m.Get("id")!.AsInt;
-            if (!lane.OwnsMember(id))
+            // a type of the core (TMudObject, TMudPlayer) also holds the members and methods that the lanes add to it, each in its own range
+            if (!lane.OwnsMember(id) && !(lane == Lane.Core && Lane.OfMember(id) != null))
             {
                 throw new InvalidOperationException("type " + t.Name + ": member or method id " + id + " is outside the range of lane " + lane.Name);
             }

@@ -46,9 +46,10 @@ internal sealed partial class Dispatcher
     /// <c>get_player_archetype</c> chooses it). Null, with a log line, for an account name that cannot be a file name or holds a control character, a file that
     /// cannot be read (it is never written over) or a world without a player archetype.
     /// </summary>
-    private PlayerState? OpenPlayer(string account)
+    private PlayerState? OpenPlayer(string account, string? fileKey = null, bool create = true)
     {
-        string? rel = FileNames.AccountFile(account);
+        fileKey ??= account;
+        string? rel = FileNames.AccountFile(fileKey);
         if (rel == null)
         {
             log(1, "player.login: the account name cannot be made a file name (empty, or its escaped form is over " + FileNames.MaxEscapedLength + " bytes)");
@@ -60,7 +61,7 @@ internal sealed partial class Dispatcher
             log(1, "player.login: the account name holds a control character, it is refused");
             return null;
         }
-        if (refused.Contains("account:" + account))
+        if (refused.Contains("account:" + fileKey))
         {
             return null;
         }
@@ -86,20 +87,24 @@ internal sealed partial class Dispatcher
                 if (r == Define.LL_EOF || ob.Arch == null)
                 {
                     FreeCfObject(ob);
-                    refused.Add("account:" + account);
-                    log(0, "the file of account " + account + " holds no player, it is left as it is");
+                    refused.Add("account:" + fileKey);
+                    log(0, "the file of account " + fileKey + " holds no player, it is left as it is");
                     return null;
                 }
                 if (world.LogCounts[(int)LogLevel.Error] > errorsBefore)
                 {
-                    log(1, "the file of account " + account + " had " + (world.LogCounts[(int)LogLevel.Error] - errorsBefore) + " errors");
+                    log(1, "the file of account " + fileKey + " had " + (world.LogCounts[(int)LogLevel.Error] - errorsBefore) + " errors");
                 }
-                if (ob.Extra?.Get("account") is { } named && FileText.UnescapeLine(named).TrimEnd(' ') != FileText.ToBytesText(account).TrimEnd(' '))
+                if (ob.Extra?.Get("account") is { } named && FileText.UnescapeLine(named).TrimEnd(' ') != FileText.ToBytesText(fileKey).TrimEnd(' '))
                 {
-                    log(1, "the file of account " + account + " says it belongs to another account; the file's name decides");
+                    log(1, "the file of account " + fileKey + " says it belongs to another account; the file's name decides");
                 }
                 ob.Extra?.Remove("account");
                 Inventories.RestoreFileOrder(ob);
+            }
+            else if (!create)
+            {
+                return null; // an account file of a slot that was never saved: there is nothing to load
             }
             else
             {
@@ -117,11 +122,11 @@ internal sealed partial class Dispatcher
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or CrossfireFatalException)
         {
-            refused.Add("account:" + account);
-            log(0, "the file of account " + account + " cannot be read, it is left as it is: " + e.Message);
+            refused.Add("account:" + fileKey);
+            log(0, "the file of account " + fileKey + " cannot be read, it is left as it is: " + e.Message);
             return null;
         }
-        return new PlayerState(account, ob) { Dirty = created };
+        return new PlayerState(account, ob) { Dirty = created, FileKey = fileKey };
     }
 
     private Outcome PlayerLogout(IReadOnlyList<Val> args)
@@ -146,24 +151,30 @@ internal sealed partial class Dispatcher
         return Outcome.Ok(Val.Nil);
     }
 
-    /// <summary>Writes the account's file (through the writer).</summary>
+    /// <summary>Writes the account's file (through the writer). An account that was unloaded (<c>unloadmudaccount</c>) writes nothing: its file is kept.</summary>
     private void SubmitAccount(PlayerState player)
     {
-        string? rel = FileNames.AccountFile(player.Account);
-        if (rel == null)
+        string? rel = FileNames.AccountFile(player.FileKey);
+        if (rel == null || !player.Loaded)
         {
             return;
         }
+        PutFile(rel, AccountFileBytes(player));
+        player.Dirty = false;
+    }
+
+    /// <summary>The text of the account's file: the player's object as <c>save_object</c> writes it, and the name of the file's account after its first line.</summary>
+    private byte[] AccountFileBytes(PlayerState player)
+    {
         var sb = new StringBuilder();
         world!.SaveObject(sb, player.Ob, 3);
         string text = sb.ToString();
         int nl = text.IndexOf('\n');
         if (nl >= 0)
         {
-            text = text.Insert(nl + 1, "account " + FileText.EscapeLine(FileText.ToBytesText(player.Account)) + "\n");
+            text = text.Insert(nl + 1, "account " + FileText.EscapeLine(FileText.ToBytesText(player.FileKey)) + "\n");
         }
-        PutFile(rel, FileText.ToBytes(text));
-        player.Dirty = false;
+        return FileText.ToBytes(text);
     }
 
     /// <summary>Sets one of the player's client strings (the whole flag name) when its value is not what the client has.</summary>

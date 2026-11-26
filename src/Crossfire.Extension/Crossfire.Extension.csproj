@@ -20,4 +20,10 @@
     <None Include="extension.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Crossfire's lib/treasures and lib/skill_params at 8b7ee7f90, unchanged (docs/extension.md, "The start path"): the data the ported code reads -->
+  <ItemGroup>
+    <EmbeddedResource Include="Data\treasures" LogicalName="treasures" />
+    <EmbeddedResource Include="Data\skill_params" LogicalName="skill_params" />
+  </ItemGroup>
+
 </Project>

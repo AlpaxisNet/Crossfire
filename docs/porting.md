@@ -160,6 +160,25 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | `fix_flesh_item` | `CfWorld.FixFleshItem` | ported |
 | `init_archetype_pointers`, `generate_treasure`, `magic_from_difficulty`, `set_abs_magic`, `set_magic`, `set_ring_bonus`, the artifacts (`load_artifacts`, `generate_artifact`, ...), `dump_*`, `free_*` | none | not ported: random magic and artifacts (phase 4), debugging dumps |
 
+### server/player.c, common/living.c, common/utils.c, server/skill_util.c, include/skillist.h (the start path, `Crossfire.Extension/Gk`)
+
+| C function | C# member | Status |
+| --- | --- | --- |
+| player.c `roll_stat`, `roll_stats` | `Start.RollStat`, `Start.RollStats` | ported (with `USE_SWAP_STATS` and `SORT_ROLLED_STATS` of config.h; the stats are in `Player.OrigStats`; `add_exp(op, 0)` is `LivingRules.AddExpNone`) |
+| player.c `give_initial_items` | `Start.GiveInitialItems` | ported (`start_spells` and `start_prayers` as the numbers of `enum spellnrs`; `pl->randomitems != NULL` is a test of the list that is passed; `known_spells` is `Player.KnownSpells`) |
+| player.c `key_change_class` | `Dispatcher.SetMudClass` (private) | the order of its `d` branch (`init_player_exp`, `give_initial_items`, `link_player_skills`) with the class object put into the tree; the stat bonus part is wave 5D's |
+| player.c `get_player`, `check_login`, `save_player`, `Roll_Again`, `Swap_Stat`, `remove_unpaid_objects`, the rest | none | not ported: the client's dialogue, the login of Crossfire's players (the extension reads the account its own way) |
+| living.c `fix_player` | `FixPlayer.Fix` (called by `GkHost.FixPlayer`) | PARTLY: the stats from `orig_stats` and the applied items' stat bonuses, `check_stat_bounds`, `maxhp`, `maxsp`, `maxgrace` from the levels, and the weight limit (`weight_limit[Str]`, which c_object.c uses). Wave 5D: resistances, ac, wc, damage, speed, light, the flags and the regeneration |
+| living.c `check_stat_bounds`, `level_exp`, `player_lvl_adj`, `con_bonus`, `sp_bonus`, `grace_bonus`, `weight_limit`, `levels` | `LivingRules.*` | ported (`settings.simple_exp` is off; `player_lvl_adj` leaves out the dragon's gifts and the "You are now level" messages) |
+| living.c `add_exp` | `LivingRules.AddExpNone` | the branch for 0 experience only |
+| utils.c `die_roll` | `LivingRules.DieRoll` | ported |
+| skill_util.c `init_new_exp_system`, `init_exp_obj`, `link_skills_to_exp`, `check_link`, `read_skill_params`, `lookup_skill_by_name` | `SkillTable.Create` and its private parts | ported (see docs/differences.md for a world with no or too many experience archetypes) |
+| skill_util.c `init_player_exp`, `link_player_skills`, `link_player_skill`, `unlink_skill` | `SkillTable.InitPlayerExp`, `LinkPlayerSkills`, `LinkPlayerSkill`, `UnlinkSkill` | ported |
+| skill_util.c `find_skill_exp_name` | none | not ported: it fills the client's skill experience statistics |
+| skill_util.c `do_skill`, `check_skill_to_apply`, `change_skill`, `calc_skill_exp`, `learn_skill`, ... | none | not ported (wave 5D and phase 4) |
+| skillist.h `skills[]` | `SkillTable.Skills` | ported |
+| lib/treasures, lib/skill_params | `src/Crossfire.Extension/Data/treasures`, `skill_params` | the files of 8b7ee7f90, unchanged, carried as resources; a file of the same name in the world's folder replaces them |
+
 ### common/item.c (names and descriptions of items)
 
 | C function | C# member | Status |
