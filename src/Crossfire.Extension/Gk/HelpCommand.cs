@@ -143,7 +143,7 @@ internal static class HelpCommand
         WrapNames(say, names);
     }
 
-    private static void WrapNames(Action<string> say, IReadOnlyList<string> names)
+    internal static void WrapNames(Action<string> say, IReadOnlyList<string> names)
     {
         string line = "";
         int linelen = 0;

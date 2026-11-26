@@ -798,6 +798,14 @@ public sealed class CommandTests
         ulong bag = inner.Result.Items.Single().Items[0].AsHandle;
         ReplyFrame inBag = g.Ext.Call(12, new[] { H(bag), Val.Int(Obj("muditems")), Val.List(Val.Int(Obj("mudrealname"))) });
         ulong banana = inBag.Result.Items.Single().Items[0].AsHandle;
+        CfObject ob = g.Ext.Dispatcher.ControllerOf("bob")!.State.Ob;
+        CfObject sack = ob.Inv!;
+        while (sack.Type != Define.CONTAINER)
+        {
+            sack = sack.Below!;
+        }
+        ob.Container = sack; // the bag is open: the id of its banana is found at the second level, which only the top level may mark
+        sack.SetFlag(Define.FLAG_APPLIED);
 
         // Act
         List<string> lines = g.Lines("mark", ((uint)banana).ToString());

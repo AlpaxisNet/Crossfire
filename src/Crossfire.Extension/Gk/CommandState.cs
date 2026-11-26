@@ -15,8 +15,7 @@ internal sealed partial class Player
     {
         get
         {
-            string name = State.Ob.Arch?.Clone.Name ?? "";
-            return name.Length >= Commands.MaxName ? name[..(Commands.MaxName - 1)] : name;
+            return Commands.CutTitle(State.Ob.Arch?.Clone.Name ?? "");
         }
     }
 }

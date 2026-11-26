@@ -314,4 +314,28 @@ public sealed partial class ContainerTests
         Assert.Equal(inner, OpenTag(g));
         Assert.True(g.T("flag", Val.Int(inner), Val.Int(Define.FLAG_APPLIED)).Result.AsBool);
     }
+
+    [Fact]
+    public void MudTransferObject_Given_an_item_in_the_sack_on_the_ground_that_the_player_has_open_When_given_Then_it_is_refused_and_the_level_keeps_it()
+    {
+        // Arrange: the sack belongs to the level, and a trade writes only the two accounts: the banana would be in two places after a restart
+        using var g = new Game();
+        g.Ext.Call(5, new[] { S("amy") }, player: "amy");
+        g.T("apply", H(g.Hall[0]), Val.Int(0));
+        ReplyFrame inner = g.Ext.Call(12, new[] { H(g.Hall[0]), Val.Int(Obj("muditems")), Val.List(Val.Int(Obj("mudrealname"))) });
+        long banana = (uint)inner.Result.Items.First(x => x.Items[1].AsString == "banana").Items[0].AsHandle;
+        var host = new FakeHost();
+        host.Answer = (name, _) => name == "player.at" ? new QueryAnswer(Status.Ok, S("amy")) : new QueryAnswer(Status.Ok, Val.Nil);
+        g.Ext.Dispatcher.QuerySource = host.Ask;
+        string before = g.T("ground", H(g.Hall[0])).Result.AsString;
+
+        // Act
+        ReplyFrame r = g.Ext.Call(Manifest.OpMudTransferObject, new[] { Val.Int(banana), Val.Int(0), Val.Int(1), Val.Int(1) }, level: "hall", player: "bob");
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.False(r.Result.AsBool);
+        Assert.Equal(before, g.T("ground", H(g.Hall[0])).Result.AsString);
+        Assert.Equal("", g.Tree());
+    }
 }

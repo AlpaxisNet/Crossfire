@@ -47,6 +47,9 @@ internal sealed class Commands
     /// <summary>include/define.h <c>MAX_BUF</c>.</summary>
     public const int MaxBuf = 256;
 
+    /// <summary>login.c copies the archetype's name with <c>strncpy(pl->title, ..., MAX_NAME)</c> and <c>MAX_NAME</c> - 1 characters remain.</summary>
+    internal static string CutTitle(string name) => name.Length >= MaxName ? name[..(MaxName - 1)] : name;
+
     /// <summary>The text of C's <c>parse_string</c> for a word that is no command.</summary>
     public const string UnknownCommand = "Unknown command.  Try help.";
 

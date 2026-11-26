@@ -1456,7 +1456,7 @@ negative index (GK's `getplayerindex` answers -1 for no player: the host is not 
 - **`mudtransferobject(id, 0, index, n)`** (slow: busy before anything changes). `id` is looked for in `ctx.player`'s own tree (deep),
   the receiver is the player at `index`. False, with nothing changed, for: a second argument that is not 0 (GK's fishing rod passes 1 with
   the index 0; nothing shows what the original did with it, so the extension does not guess), a negative `n` or more than the stack has
-  (refused silently: C would take the whole stack, a trade should not), an item with `FLAG_NO_DROP`, no receiver at the index, the giver
+  (refused silently: C would take the whole stack, a trade should not), an item with `FLAG_NO_DROP` or `FLAG_STARTEQUIP`, an invisible object, an item that is not in his own pack (one in an open sack of the ground belongs to the level), no receiver at the index, the giver
   himself, a receiver that is not logged in here or is unloaded, a failed query (the call fails), an item that cannot be taken off (an
   applied cursed weapon: `apply_special` says why), and a receiver that cannot carry it: C's test of `pick_up_object` (`weight` of the objects
   and of what a container holds after its reduction, plus what he carries, against `weight_limit[Str]` of the receiver) says "That item

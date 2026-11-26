@@ -60,6 +60,7 @@ internal static class AccountLife
         {
             return;
         }
+        op.ClearFlag(Define.FLAG_NO_FIX_PLAYER); // login.c: CLEAR_FLAG(op, FLAG_NO_FIX_PLAYER) after load_object
         op.Carrying = CfWorld.SumWeight(op);
         if (skills is { NrOfExpCat: > 0 })
         {

@@ -165,6 +165,13 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Ok(Val.False);
         }
+        // only what lies in the giver's own pack: an item of a sack that he has open on the ground belongs to the level, which this
+        // call does not write; an invisible object (skill, experience, force) is no item; a loan of the gods (FLAG_STARTEQUIP) is not
+        // given away (C's drop_object makes it vanish, which a trade has no way to say)
+        if (!IsInside(item, giver.Ob) || item.Invisible != 0 || item.QueryFlag(Define.FLAG_STARTEQUIP))
+        {
+            return Outcome.Ok(Val.False);
+        }
         long have = Inventory.StackCount(item);
         if (count > have || item.QueryFlag(Define.FLAG_NO_DROP))
         {

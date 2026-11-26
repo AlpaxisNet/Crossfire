@@ -512,6 +512,9 @@ The table of `mudcommand` stands in for C's `parse_string` and `find_command` (s
   `pick_up_object`). Alpaxis's choices: a count above the stack is refused (C's pick up takes the whole stack); the text of a refusal for
   weight goes to the receiver (C's picker); the second argument must be 0 (nothing shows what 1 meant in GK's fishing rod: it is refused);
   the receiver knows the item by an id of his own; no `mudowner` is set; no text on success.
+  Only an item of the giver's own pack is given: one in a sack lying on the ground that he has open belongs to the level, which the call
+  does not write, so it is refused; an invisible object (skill, experience, force) is no item; an item with `FLAG_STARTEQUIP` (C's
+  `drop_object` makes it vanish) is refused, as nothing shows what a trade of such an item should do.
 - **`mudexamineinvobject2`** shows another player's item to the asker with the lines of `examine` (the same as for his own items);
   C's examine of a player's item does not exist (a player never looks into another's pack). The id is looked for in the other
   player's tree, so whoever knows an id of it can read the item's text (GK's trade window sends the id to the buyer).
