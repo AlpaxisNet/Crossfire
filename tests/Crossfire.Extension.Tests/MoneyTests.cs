@@ -154,6 +154,23 @@ public sealed class MoneyTests
     }
 
     [Fact]
+    public void MudAddMoney_Given_a_pouch_that_makes_the_coins_weigh_nothing_When_coins_are_added_Then_one_unit_is_counted_and_nothing_is_divided_by_zero()
+    {
+        // Arrange: Str 50 halves the platinum coin's weight of 1 to 0, which C raises to 1 ("Prevent divide by zero")
+        using DirectExt ext = Start(MoneyWorld.Make("bob", "arch pouch\napplied 1\nStr 50\nend\n"));
+        ulong bob = Login(ext);
+        ulong pouch = ItemOf(ext, bob, "pouch");
+
+        // Act
+        ReplyFrame r = Fn(ext, Manifest.OpMudAddMoney, "bob", Val.Int(1000));
+
+        // Assert
+        Assert.Equal(0UL, r.Status);
+        Assert.Equal(10, Stacks(ext, pouch, player: false)["platinacoin"]);
+        Assert.Equal(1000, MoneyOf(ext, bob));
+    }
+
+    [Fact]
     public void MudAddMoney_Given_a_pouch_that_is_not_applied_or_does_not_hold_gold_When_coins_are_added_Then_the_pack_gets_them()
     {
         // Arrange

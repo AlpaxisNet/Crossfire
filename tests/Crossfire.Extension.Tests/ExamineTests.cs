@@ -135,6 +135,11 @@ public sealed class ExamineUnitTests
         Assert.Equal(new[] { "The object has a story:", "Brewed in a hurry." }, identified.Skip(1).Take(2));
         Assert.DoesNotContain("The object has a story:", unknown);
         Assert.Contains("Brewed in a hurry.", unknown);
+
+        // an identified object that needs no identifying (a rock) has no story line
+        var plain = ExamineOf(w => Make(w, "rock", o => { o.Weight = 0; o.Value = 0; o.Msg = "Brewed in a hurry."; o.SetFlag(Define.FLAG_IDENTIFIED); }));
+        Assert.DoesNotContain("The object has a story:", plain);
+        Assert.Contains("Brewed in a hurry.", plain);
     }
 
     [Theory]
