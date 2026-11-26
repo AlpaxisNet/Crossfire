@@ -299,6 +299,8 @@ public sealed partial class ContainerTests
     {
         // Arrange
         using var g = new Game("arch sack\nend\n");
+        g.Ext.Call(3);
+        Assert.True(WaitFor(() => ReadData(g.Ext, "levels/hall.map").Contains("arch sack"))); // the seed is written: the level is clean now
         string before = ReadData(g.Ext, "accounts/bob.txt");
 
         // Act
@@ -324,6 +326,8 @@ public sealed partial class ContainerTests
             MaxDelay = TimeSpan.FromMilliseconds(100),
             BetweenMove = (source, destination) => order.Add(source + ">" + destination),
         }));
+        g.Ext.Call(3);
+        Assert.True(WaitFor(() => ReadData(g.Ext, "levels/hall.map").Contains("arch bigsack"))); // the seed is written: the level is clean now
         ReplyFrame opened = g.T("apply", H(g.Hall[2]), Val.Int(0));
         long banana = Sets(opened).Where(kv => kv.Value.StartsWith("banana", StringComparison.Ordinal)).Select(kv => long.Parse(kv.Key.Substring("clientr.mud_item".Length))).Single();
         long bigsack = Sets(opened).Where(kv => kv.Value.StartsWith("bigsack", StringComparison.Ordinal)).Select(kv => long.Parse(kv.Key.Substring("clientr.mud_item".Length))).Single();
@@ -331,11 +335,12 @@ public sealed partial class ContainerTests
         // Act
         Assert.True(Result(g.Move(banana, bigsack, 0)));
         g.Ext.Call(3);
-        bool written = WaitFor(() => System.Text.RegularExpressions.Regex.IsMatch(ReadData(g.Ext, "levels/hall.map"), "arch bigsack[\\s\\S]*?arch banana"));
+        bool written = WaitFor(() => System.Text.RegularExpressions.Regex.IsMatch(ReadData(g.Ext, "levels/hall.map"), "arch bigsack\\s+carrying 200\\s+applied 1\\s+arch banana"));
+        string level = ReadData(g.Ext, "levels/hall.map");
         g.Dispose();
 
         // Assert
-        Assert.True(written);
+        Assert.True(written, level);
         Assert.Empty(order);
     }
 
