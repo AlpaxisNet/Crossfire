@@ -154,13 +154,20 @@ internal static class ItemStrings
     public static long StackWeight(CfObject op) => (long)Math.Max(1u, op.Nrof) * op.Weight + op.Carrying;
 
     /// <summary>
+    /// Field [0] of an item string, and the name <c>mudlistweapons</c> and its kin write: the short name of the object as the client
+    /// shows it. A comma in a name (one Graal Kingdoms archetype has one, and scripts set <c>mudrealname</c>) would shift the seven fields,
+    /// so it is written as a semicolon (docs/differences.md). The Item-Menu's quick bar compares the two texts, so both come from here.
+    /// </summary>
+    public static string DisplayName(CfWorld world, CfObject op) => FileText.FromBytesText(world.QueryShortName(op)).Replace(',', ';');
+
+    /// <summary>
     /// The seven comma fields of <c>clientr.mud_item&lt;id&gt;</c> (docs/mud-phase3.md section 5): the short name, the picture, the type,
     /// the quantity, the weight of the whole stack in grams, the flag word and 1 inside the open container.
     /// </summary>
     public static string Text(CfWorld world, CfObject op, bool inContainer)
     {
         var sb = new StringBuilder();
-        sb.Append(FileText.FromBytesText(world.QueryShortName(op))).Append(',');
+        sb.Append(DisplayName(world, op)).Append(',');
         sb.Append(TMudArchMembers.Icon(op.Face?.Name)).Append(',');
         sb.Append(op.Type.ToString(CultureInfo.InvariantCulture)).Append(',');
         sb.Append(op.Nrof.ToString(CultureInfo.InvariantCulture)).Append(',');
