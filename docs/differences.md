@@ -380,3 +380,26 @@ functions").
   not known.
 - **The unapply of a dropped object and of a skill.** `Dispatcher.ApplySpecialUnapply` (lane 5A's `drop_object`) and
   `SkillTable.ApplySpecial` (lane 5D's `change_skill`) are set at `session.init` and call `apply_special`.
+
+## Consumables (`Gk/Consumable.cs`; lane 6C of phase 3)
+
+`apply_food`, `eat_special_food`, `dragon_eat_flesh`, `apply_poison` and `apply_potion` are ported from `server/apply.c` at 8b7ee7f90 with
+C's arithmetic (golden values: `tests/Crossfire.Extension.Tests/golden/consumable_golden.c`). What differs, and why:
+
+- **A potion whose effect needs code the extension does not have is not drunk.** A potion that casts a spell (`stats.sp` is not 0, which
+  includes C's "super" stat potions), a cursed potion of restoration (`drain_stat`) and a protection potion (a `force` of type
+  `POTION_EFFECT` that the tick of C counts down; the extension has no tick, so the protection would never end) tell the player "That is
+  not available yet." through `DrawInfo` and stay in the pack, as the design says (mud-phase3.md 4.4: 39 of Graal Kingdoms' 51 potion
+  archetypes would be eaten for nothing). C has already identified the potion by then, so it is identified. `apply_potion` still
+  returns 1 (manual_apply's value).
+- **Food that changes stats or protects** (`eat_special_food`'s `cast_change_attr`: strength, dexterity, constitution, charisma and the
+  twelve resistances that have a protection spell) says "That is not available yet." once; the food is eaten, its food level and its
+  hit and spell points are applied as in C (it is not a potion: C's other effects of it are exact).
+- **`hit_player(..., AT_POISON)` does no damage.** In C an attack of type poison has `dam = 0` after the roll for the effect (the type is an
+  effect, `hit_player_attacktype`), so a poisonous drink and a cursed food lose no hit points; what C does is `poison_player` (a
+  `poisoning` force that the tick works on), which is left out with the rest of the tick. The line of text and the loss of a quarter of
+  the food level are C's. `contr->killer` is not kept (nothing kills a player in the extension).
+- **`new_draw_info`'s colour** is not passed (the skin message of a dragon is red in C).
+- **`onEatFood(foodarch, food, wascursed)`** is a player event that Graal Kingdoms' `mudplayers` defines; it is sent after the food is
+  used up on a link of 1.1 (it has typed parameters), so `food` is a dead handle (nil in the script) when the last item of the stack was
+  eaten; the archetype is always there. It is not sent for a monster and not for a potion or poison (C's eating is food, drink and flesh).

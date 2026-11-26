@@ -1310,3 +1310,28 @@ function, or the fallback `defaultApply`); in the request of `defaultApply` the 
 
 **Not available yet.** Scrolls, spell books, skill scrolls, rods, horns, skill tools, the improvers, the clock, the shop menu, the power
 crystal, the save bed and exits answer "That is not available yet." and are not used up; levers and handles do nothing (porting.md).
+
+## Consumables (lane 6C of phase 3, wave 6)
+
+`Gk/Consumable.cs` is `server/apply.c`'s `apply_food`, `eat_special_food`, `dragon_eat_flesh`, `apply_poison` and `apply_potion`, with
+every `new_draw_info` as `CrossfireHost.DrawInfo`, `fix_player` as `CrossfireHost.FixPlayer` and the use of an object as
+`CfWorld.DecreaseObNr` (which tells the client and fixes the player; the strings of the window follow at the end of the request through
+`Player.Touch()`). `Dispatcher.ApplyWave6C` (`Dispatcher.Wave6C.cs`) is the part of `manual_apply` for the types DRINK, FOOD, FLESH,
+POISON and POTION (`Dispatcher.ApplyByLane` asks it; it answers 1 for them, null for any other type). The lane has no function and no
+method of its own, so it has no id in its ranges; its callers (6B's `apply`, `mudapplyinvobject`; 7A's commands) are slow or
+`CheckBusy()` first, so nothing here changes while the worker is busy. For a potion `manual_apply`'s skill check runs first
+(`SkillTable.CheckSkillToApply` with `FLAG_APPLIED` set and cleared around it, as C does).
+
+- **A potion of strength and its kind** go through `LivingChange.ChangeAbil`: `Player.OrigStats` and the object's stats change, the line
+  `mudorigstats` is stored (`StoreStats`) and the player is told ("You feel stronger."); "Nothing happened." when the stat is at its
+  natural maximum (the potion is used up, as in C). The potion is identified first (`identify`) when it is not.
+- **The improvement potion** (`attacktype` god power) raises (cursed: lowers to 1) the first of the points per level below the player's
+  level (`Player.LevHp`, `LevSp`, `LevGrace`) and stores the three lines (`mudlevhp`, `mudlevsp`, `mudlevgrace`).
+- **The potion of restoration** removes the `depletion` force with a line for each stat it took, or says "You feel a great loss...".
+- **What is not available** (spell potions, cursed restoration, protection potions; food that changes stats or protects) says "That is
+  not available yet." and a potion stays in the pack: docs/differences.md "Consumables".
+- **A dragon** (`CfWorld.IsDragonPl`: the archetype's race is `dragon`) that has the forces `dragon_skin_force` and
+  `dragon_ability_force` eats flesh by `dragon_eat_flesh`: the skin's resistance may rise by one (the dice are `CfWorld.Random`), the ability
+  focus may change. A dragon without the forces eats it as a normal player.
+- **The player event `onEatFood(foodarch, food, wascursed)`** (`Manifest.EventOnEatFood`, `handle:TMudArch`, `handle:TMudObject`, `int`;
+  a 1.1 key) follows the state change of a player's food, drink or flesh, after the object is used up; it is not sent on a 1.0 link.
