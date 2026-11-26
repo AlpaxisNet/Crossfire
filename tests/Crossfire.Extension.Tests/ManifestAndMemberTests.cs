@@ -53,7 +53,7 @@ public class ManifestAndMemberTests
     [InlineData("TMudObject", "mudgraalparam", "npcparam")]
     [InlineData("TMudObject", "mudcharm", "mudcharisma")]
     [InlineData("TMudPlayer", "mudcharm", "mudcharisma")]
-    public void Build_Given_two_writable_members_of_one_field_When_listed_Then_at_most_one_is_stable(string type, string a, string b)
+    public void Build_Given_two_writable_members_of_one_field_When_listed_Then_neither_is_stable(string type, string a, string b)
     {
         // Arrange
         Val t = Manifest.Build().Get("types")!.Items.Single(x => x.Get("name")!.AsString == type);
@@ -63,7 +63,9 @@ public class ManifestAndMemberTests
         Val mb = t.Get("members")!.Items.Single(m => m.Get("name")!.AsString == b);
 
         // Assert (protocol 6.1: a stable member changes only through a set of that same member)
-        Assert.False(ma.Get("stable")!.AsBool && mb.Get("stable")!.AsBool);
+        // (a set of one name changes the value of the other, which the host would keep as it was if that one were stable)
+        Assert.False(ma.Get("stable")!.AsBool);
+        Assert.False(mb.Get("stable")!.AsBool);
     }
 
 
@@ -524,6 +526,43 @@ public class ManifestAndMemberTests
         Assert.True(exited);
         Assert.Equal(0, process.ExitCode);
         Assert.Equal("", process.StandardOutput.ReadToEnd());
+    }
+
+    [Fact]
+    public void Main_Given_a_running_extension_When_it_gets_SIGTERM_Then_it_stays_until_the_connection_closes()
+    {
+        // Arrange (a service manager sends SIGTERM to the host and the extension at once; the extension must outlive it to write)
+        using var world = TestWorld.Make();
+        using var folder = new TempFolder();
+        string path = Path.Combine(folder.Path, "s");
+        using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        listener.Bind(new UnixDomainSocketEndPoint(path));
+        listener.Listen(1);
+        using Process process = Start("--connect", path);
+        using Socket accepted = listener.Accept();
+        accepted.ReceiveTimeout = 20_000;
+        using var stream = new NetworkStream(accepted, ownsSocket: false);
+        stream.Write(FrameCodec.Encode(new HelloFrame(ScriptedHost.HostHello(world.Path))));
+        FrameCodec.Read(stream, FrameCodec.InitialMaxFrame);
+        stream.Write(FrameCodec.Encode(new ReqFrame(1, 1, Array.Empty<ulong>(), ScriptedHost.NoCtx(), Array.Empty<Val>())));
+        ReadSkippingLogs(stream);
+
+        // Act
+        using (Process kill = Process.Start("kill", "-TERM " + process.Id)!)
+        {
+            kill.WaitForExit();
+        }
+        bool exitedAtTerm = process.WaitForExit(1500);
+        stream.Write(FrameCodec.Encode(new ReqFrame(2, 64, Array.Empty<ulong>(), ScriptedHost.NoCtx(), new[] { Val.Str("sword") })));
+        Frame? stillAnswers = ReadSkippingLogs(stream);
+        accepted.Shutdown(SocketShutdown.Both);
+        bool exitedAtEof = process.WaitForExit(5000);
+
+        // Assert
+        Assert.False(exitedAtTerm);
+        Assert.IsType<ReplyFrame>(stillAnswers);
+        Assert.True(exitedAtEof);
+        Assert.Equal(0, process.ExitCode);
     }
 
     private static Frame? ReadSkippingLogs(Stream stream)

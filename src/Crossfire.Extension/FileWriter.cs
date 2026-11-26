@@ -314,7 +314,7 @@ internal sealed partial class FileWriter
                         if (passes >= options.MaxFailedPasses)
                         {
                             gaveUp.Add(path);
-                            pending.Remove(path); // a newer submission of a file given up is given up with it
+                            // only the content that failed is given up: a newer submission (in pending) was never tried and still is
                             continue;
                         }
                         // tried again later and later: Quiet, twice that, ... up to MaxRetryDelay, for this file only

@@ -4,6 +4,7 @@
 // This file is part of the Crossfire extension and is under the GNU General Public License, version 2 or (at your option) any later
 // version (see LICENSE).
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 
 namespace Crossfire.Extension;
 
@@ -30,6 +31,11 @@ internal static class Program
             socket.Dispose();
             return ExitNoConnection;
         }
+        // A service manager stops a whole control group with SIGTERM at once: the host and this process. The host flushes and ends the
+        // session (session.shutdown, then it closes the connection) and this process must still be there to write what is
+        // pending; so SIGTERM is ignored. The process ends at the host's shutdown or when the connection closes (the host kills it
+        // when it does not).
+        using PosixSignalRegistration term = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => context.Cancel = true);
         using var stream = new NetworkStream(socket, ownsSocket: true);
         return ExtensionRunner.Run(stream);
     }

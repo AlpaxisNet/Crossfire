@@ -661,6 +661,89 @@ public class FileWriterTests
     }
 
     [Fact]
+    public void Run_Given_the_last_allowed_pass_fails_while_a_newer_content_is_submitted_When_given_up_Then_the_newer_content_is_still_tried_and_written()
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        using var inside = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int calls = 0;
+        FileWriter writer = Make(folder, new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(20),
+            MaxDelay = TimeSpan.FromMilliseconds(20),
+            MaxFailedPasses = 1,
+            BeforeRename = _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    inside.Set();
+                    release.Wait(10_000);
+                    throw new IOException("disk full");
+                }
+            },
+        });
+        writer.Submit("a.txt", Bytes("old"));
+        Assert.True(inside.Wait(5000));
+
+        // Act
+        writer.Submit("a.txt", Bytes("new"));
+        release.Set();
+        bool written = WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")));
+
+        // Assert (only the content that failed is given up; the one never tried is written)
+        Assert.True(written);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(folder.Path, "a.txt")));
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Flush_Given_a_file_in_a_long_back_off_When_the_cause_is_gone_and_a_write_is_forced_Then_it_is_written_now(bool byWait)
+    {
+        // Arrange
+        using var folder = new TempFolder();
+        int failures = 0;
+        bool broken = true;
+        FileWriter writer = Make(folder, new FileWriterOptions
+        {
+            Quiet = TimeSpan.FromMilliseconds(200),
+            MaxDelay = TimeSpan.FromMilliseconds(200),
+            MaxRetryDelay = TimeSpan.FromSeconds(60),
+            MaxFailedPasses = 100,
+            BeforeRename = _ =>
+            {
+                if (Volatile.Read(ref broken))
+                {
+                    Interlocked.Increment(ref failures);
+                    throw new IOException("disk full");
+                }
+            },
+        });
+        writer.Submit("a.txt", Bytes("x"));
+        Assert.True(WaitFor(() => Volatile.Read(ref failures) >= 3)); // the tries are 0.2, 0.4 and 0.8 s apart: the next one is 0.8 s away
+        Volatile.Write(ref broken, false);
+
+        // Act
+        bool ok = true;
+        if (byWait)
+        {
+            ok = writer.WaitWritten(TimeSpan.FromMilliseconds(500));
+        }
+        else
+        {
+            writer.Kick();
+            ok = WaitFor(() => File.Exists(Path.Combine(folder.Path, "a.txt")), 500);
+        }
+
+        // Assert
+        Assert.True(ok);
+        Assert.True(File.Exists(Path.Combine(folder.Path, "a.txt")));
+        writer.Stop(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
     public void Run_Given_a_failed_pass_and_a_newer_submission_of_the_same_file_When_written_again_Then_the_newer_content_is_the_file()
     {
         // Arrange

@@ -1363,6 +1363,39 @@ public abstract class LevelObjectTests
     }
 
     [Fact]
+    public void LevelLoad_Given_a_level_named_in_another_case_by_the_host_When_made_unloaded_and_loaded_Then_it_is_one_level_with_one_file_and_the_seed_is_found()
+    {
+        // Arrange (the host compares level names without regard to case and names the level as whoever loaded it first spelled it)
+        using IExt ext = Hall();
+        (List<Val> seedPlaces, _) = LoadAll(ext, "HALL.NW"); // the seed's file is hall.nw
+        ulong made = Add(ext, "Hall.nw", "banana", 5, 6); // the same level, spelled otherwise
+        Flushed(ext, "levels/hall.nw.map");
+
+        // Act
+        Assert.Equal(0UL, ext.Call(8, new[] { S("HALL.nw") }).Status);
+        (List<Val> again, _) = LoadAll(ext, "hAll.nw");
+
+        // Assert
+        Assert.NotEmpty(seedPlaces);
+        Assert.Equal(seedPlaces.Count + 1, again.Count); // the made banana came back with the seed's objects
+        Assert.Equal(new[] { "hall.nw.map" }, Directory.GetFiles(ObjectWorld.Data(ext.World, "levels")).Select(Path.GetFileName).ToArray());
+        Assert.NotEqual(0UL, made);
+    }
+
+    [Fact]
+    public void LevelLoad_Given_a_seed_file_spelled_in_mixed_case_When_the_level_is_loaded_in_any_case_Then_the_seed_is_read()
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make(("Hall.NW", ObjectWorld.SeedHall)));
+
+        // Act
+        (List<Val> places, _) = LoadAll(ext, "hall.nw");
+
+        // Assert
+        Assert.NotEmpty(places);
+    }
+
+    [Fact]
     public void Set_Given_the_value_the_member_already_has_When_set_Then_ok_and_no_event_but_a_changed_value_fires_one()
     {
         // Arrange

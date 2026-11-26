@@ -54,10 +54,10 @@ internal static class TMudObjectMembers
             return SetResult.Ok(Val.Str(GkLook.ImageOf(lo.Ob)));
         });
         b.Int("mudtype", o => o.Type, null, 0, 0, true);
-        b.ExtraInt("mudgraaltype", "graalnpctype", -1, true, true);
-        b.ExtraInt("npctype", "graalnpctype", -1, true, false); // an alias of mudgraaltype: only one of the two may be stable (protocol 6.1)
-        b.ExtraStr("mudgraalparam", "graalnpcparam", true, true);
-        b.ExtraStr("npcparam", "graalnpcparam", true, false); // an alias of mudgraalparam
+        b.ExtraInt("mudgraaltype", "graalnpctype", -1, true, false); // two names of one field: neither is stable, a set of one changes what the host would hold for the other (protocol 6.1)
+        b.ExtraInt("npctype", "graalnpctype", -1, true, false);
+        b.ExtraStr("mudgraalparam", "graalnpcparam", true, false); // not stable, like npcparam: the same field
+        b.ExtraStr("npcparam", "graalnpcparam", true, false);
 
         // life, stats, names (shared with the player)
         b.SharedLife(stable: true);

@@ -277,7 +277,7 @@ internal sealed class FieldBuilder<T>
         Int("mudwisdom", o => o.Stats.Wis, (o, n) => o.Stats.Wis = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_wis");
         Int("mudintelligence", o => o.Stats.Int, (o, n) => o.Stats.Int = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_int");
         Int("mudpower", o => o.Stats.Pow, (o, n) => o.Stats.Pow = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_pow");
-        Int("mudcharm", o => o.Stats.Cha, (o, n) => o.Stats.Cha = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, stable, "clientr.mud_cha");
+        Int("mudcharm", o => o.Stats.Cha, (o, n) => o.Stats.Cha = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, false, "clientr.mud_cha"); // not stable, like mudcharisma: the same field
         Int("mudcharisma", o => o.Stats.Cha, (o, n) => o.Stats.Cha = (sbyte)n, sbyte.MinValue, sbyte.MaxValue, false, "clientr.mud_cha");
         Str("mudrealname", o => o.Name, (o, s) => o.Name = s, stable);
         Str("mudtitle", o => o.Title, (o, s) => o.Title = s.Length == 0 ? null : s, stable);

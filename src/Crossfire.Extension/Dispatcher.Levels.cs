@@ -69,6 +69,7 @@ internal sealed partial class Dispatcher
     /// </summary>
     private Level? GetOrReadLevel(string name)
     {
+        name = LevelKey(name);
         if (levels.TryGetValue(name, out Level? held))
         {
             return held;
@@ -88,8 +89,8 @@ internal sealed partial class Dispatcher
             }
             if (bytes == null && IsPlainFileName(name))
             {
-                string seed = Path.Combine(host.WorldDir, "mudlevels", name);
-                if (File.Exists(seed))
+                string? seed = SeedFile(name);
+                if (seed != null)
                 {
                     bytes = File.ReadAllBytes(seed);
                     source = "seed";
@@ -129,6 +130,42 @@ internal sealed partial class Dispatcher
         }
     }
 
+    /// <summary>
+    /// The key and the file name of a level: its name with the ASCII letters folded to lower case. The host compares level names
+    /// without regard to case, so one level must not be two here (two files, two sets of objects).
+    /// </summary>
+    internal static string LevelKey(string name) => string.Create(name.Length, name, (span, source) =>
+    {
+        for (int i = 0; i < source.Length; i++)
+        {
+            char c = source[i];
+            span[i] = c is >= 'A' and <= 'Z' ? (char)(c + 32) : c;
+        }
+    });
+
+    /// <summary>The seed file of a level (the seed's own spelling of the name may differ in case), or null.</summary>
+    private string? SeedFile(string key)
+    {
+        string folder = Path.Combine(host.WorldDir, "mudlevels");
+        string exact = Path.Combine(folder, key);
+        if (File.Exists(exact))
+        {
+            return exact;
+        }
+        if (!Directory.Exists(folder))
+        {
+            return null;
+        }
+        foreach (string file in Directory.EnumerateFiles(folder))
+        {
+            if (LevelKey(Path.GetFileName(file)) == key)
+            {
+                return file;
+            }
+        }
+        return null;
+    }
+
     private static bool IsPlainFileName(string name) =>
         name.Length > 0 && name != "." && name != ".." && name.IndexOfAny(new[] { '/', '\\', '\0' }) < 0;
 
@@ -146,7 +183,7 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "level.load takes a level name and a cursor");
         }
-        string name = args[0].AsString;
+        string name = LevelKey(args[0].AsString);
         Val cursor = args[1];
         Outcome none = Outcome.Ok(new Page<LevelObject>(Array.Empty<LevelObject>(), false, Val.Nil).Result());
         long budget = Paging.ReplyBudget(maxFrame, new Page<LevelObject>(Array.Empty<LevelObject>(), true, Val.Int(int.MaxValue)).Result());
@@ -219,7 +256,7 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Fail(Status.BadArgs, "level.unload takes a level name");
         }
-        if (!levels.TryGetValue(args[0].AsString, out Level? level))
+        if (!levels.TryGetValue(LevelKey(args[0].AsString), out Level? level))
         {
             return Outcome.Ok(Val.Nil);
         }

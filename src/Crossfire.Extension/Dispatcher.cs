@@ -121,7 +121,7 @@ internal sealed partial class Dispatcher : IMemberEnv
         effects.Clear();
         events.Clear();
         worldErrorLines = 0;
-        ctxLevel = req.Ctx.Get("level") is { Kind: ValKind.String } l ? l.AsString : null;
+        ctxLevel = req.Ctx.Get("level") is { Kind: ValKind.String } l ? LevelKey(l.AsString) : null;
         ctxPlayer = req.Ctx.Get("player") is { Kind: ValKind.String } p ? p.AsString : null;
         Outcome outcome;
         try

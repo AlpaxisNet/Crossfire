@@ -34,7 +34,7 @@ The output folder of the build is an extension folder (protocol section 1): the 
 `flock(2)` on `<data_dir>/.lock` (the file is created when missing), before it reads a single archetype: the host's HELLO deadline
 is 15 s, shorter than the wait. A lock held by an older process is waited for up to 20 s (the file is tried every 25 ms: `flock`
 has no wait with a time limit); if it is still held, `session.init` answers `busy` (status 7), no world is loaded, and the
-process exits when the host closes the connection. If the connection ends during the wait, the wait stops at once. The lock belongs
+process exits when the host closes the connection. SIGTERM is ignored: a service manager stops the host and the extension of one control group at once, and the extension must outlive the signal to write what the host's last `objects.blobs` and `session.shutdown` bring; it ends at the shutdown or when the connection closes (the host kills it when it does not). If the connection ends during the wait, the wait stops at once. The lock belongs
 to the open file and is held until the process ends (the kernel drops it on a crash too), so another process sees it held: the
 tests show that with `flock(1)` as the second process, in both directions. The file is opened with `open(2)` directly, because
 `File.OpenHandle` makes the .NET runtime take advisory locks of its own, which would make a plain open fail while an older process
@@ -86,7 +86,7 @@ content of a file as bytes) and hands it over, and does not wait for Wr except i
   after twice that and so on up to 30 s (`MaxRetryDelay`). The back-off is per file: a file that failed waits its own time while the
   others are written at their usual times; a newer submission of a file that waits replaces its content and does not shorten the
   wait. Only the first failure of a series (a failure while no other file is waiting to be tried again) is logged; after 8 failed
-  passes of one file in a row (`MaxFailedPasses`) that file is given up and logged once per pass. A flush or shutdown forces a try of
+  passes of one file in a row (`MaxFailedPasses`) that content of the file is given up and logged once per pass (a newer content that was submitted meanwhile was never tried and is still written). A flush or shutdown forces a try of
   every file regardless of the back-off; `session.shutdown` with `save` true answers `internal` when a file was given up or not
   written in time.
 - **Start.** When the writer starts (the process holds the lock then) it removes `<name>.<pid>.tmp` files that a crashed process
@@ -116,7 +116,7 @@ logged-in player. `stats` counts the tags given out (`tags`, dead ones included)
 ### `level.load` (op 7) and `level.unload` (op 8)
 
 - **Where the objects come from.** The first call (cursor nil) for a level the extension does not hold reads
-  `<data_dir>/levels/<file>` when the extension saved the level before, else the seed `<world_dir>/mudlevels/<level>` (the file of
+  `<data_dir>/levels/<file>` (a level is held, named and filed by its name with the ASCII letters folded to lower case: the host compares level names without regard to case, so `Hall.nw` and `HALL.NW` are one level; the seed file is found whatever its own case) when the extension saved the level before, else the seed `<world_dir>/mudlevels/<level>` (the file of
   that name, only when the level's name is a plain file name: no `/`, `\` or NUL, not `.` or `..`), else the level is unknown. A
   level that is saved takes precedence over the seed for good: a level whose saved file holds no objects stays empty. A file that
   exists and cannot be read (no permission, a folder in its place) is logged, the level stays unknown to every op, and the file is never
@@ -449,8 +449,8 @@ experience (`mudhp` ... `mudexp`, `mudfood`, `mudlevel`, regeneration and combat
 `confused`, `blind`, `undead`, `flying`) and the derived names `fullname` and `mudfullname`. Every member of a player but `mudid` and
 `ismudobject` is not stable (the player's rules recompute them).
 
-Of two members that name one field (`mudgraaltype` and `npctype`, `mudgraalparam` and `npcparam`, `mudcharm` and `mudcharisma`) only
-the first is stable: a set of the other would change a value the host cached for the first.
+Of two members that name one field (`mudgraaltype` and `npctype`, `mudgraalparam` and `npcparam`, `mudcharm` and `mudcharisma`) neither
+is stable: a set of one would change a value the host cached for the other.
 
 **Texts on one line.** A `set` of a text member of a level object (`img`, `npcparam`, `mudgraalparam`, `restrictaccess`,
 `mudrealname`, `mudtitle`, `mudslaying`, `mudrace`) whose value holds a newline or a carriage return is refused (status "bad
@@ -479,10 +479,10 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `icon` | 206 | string | r | yes | `ob->face->name`, derived as on `TMudArch` | 4.5, 5.5: read only |
 | `img` | 207 | string | rw | yes | extra line `mudimg` when a script set one, else the icon | 3.3: INFERRED, 141 reads and 33 writes in 77 files; GK writes it |
 | `mudtype` | 208 | int | r | yes | `ob->type` | 4.4, 5.5: read only |
-| `mudgraaltype` | 209 | int | rw | yes | extra line `graalnpctype` (-1 when absent) | 4.5, 5.5; written by GK's staff item tool |
-| `npctype` | 210 | int | rw | no | extra line `graalnpctype` (-1 when absent) | 4.5: GK reads both names; not stable: an alias of `mudgraaltype`, which is the stable one (protocol 6.1: a stable member changes only through a set of that same member) |
-| `mudgraalparam` | 211 | string | rw | yes | extra line `graalnpcparam` ("" when absent) | 4.5, 5.5 |
-| `npcparam` | 212 | string | rw | no | extra line `graalnpcparam` ("" when absent) | 4.5: GK reads both names; not stable: an alias of `mudgraalparam`, which is the stable one (protocol 6.1: a stable member changes only through a set of that same member) |
+| `mudgraaltype` | 209 | int | rw | no | extra line `graalnpctype` (-1 when absent) | 4.5, 5.5; written by GK's staff item tool |
+| `npctype` | 210 | int | rw | no | extra line `graalnpctype` (-1 when absent) | 4.5: GK reads both names; not stable: one field with `mudgraaltype` (protocol 6.1) |
+| `mudgraalparam` | 211 | string | rw | no | extra line `graalnpcparam` ("" when absent) | 4.5, 5.5 |
+| `npcparam` | 212 | string | rw | no | extra line `graalnpcparam` ("" when absent) | 4.5: GK reads both names; not stable: one field with `mudgraalparam` (protocol 6.1) |
 | `mudlevel` | 213 | int | rw | no | `ob->level` | 5.5; written by GK's staff tool; not stable (the experience rules of phase 4 change it). Client string `clientr.mud_level`. |
 | `mudhp` | 214 | int | rw | no | `ob->stats.hp` | 5.5: EVIDENCED, 354 writes; not stable (regeneration, combat). Client string `clientr.mud_hp`. |
 | `mudmaxhp` | 215 | int | rw | no | `ob->stats.maxhp` | 5.5: 243 writes. Client string `clientr.mud_maxhp`. |
@@ -507,8 +507,8 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `mudwisdom` | 234 | int | rw | yes | `ob->stats.Wis` | 5.5. Client string `clientr.mud_wis`. |
 | `mudintelligence` | 235 | int | rw | yes | `ob->stats.Int` | 5.5. Client string `clientr.mud_int`. |
 | `mudpower` | 236 | int | rw | yes | `ob->stats.Pow` | 5.5. Client string `clientr.mud_pow`. |
-| `mudcharm` | 237 | int | rw | yes | `ob->stats.Cha` | 5.5: the item tool and GK write `mudcharm`. Client string `clientr.mud_cha`. |
-| `mudcharisma` | 238 | int | rw | no | `ob->stats.Cha` | 5.5: alias; the identification list names `mudcharisma`. Client string `clientr.mud_cha`; not stable: an alias of `mudcharm`, which is the stable one (protocol 6.1: a stable member changes only through a set of that same member) |
+| `mudcharm` | 237 | int | rw | no | `ob->stats.Cha` | 5.5: the item tool and GK write `mudcharm`. Client string `clientr.mud_cha`. |
+| `mudcharisma` | 238 | int | rw | no | `ob->stats.Cha` | 5.5: alias; the identification list names `mudcharisma`. Client string `clientr.mud_cha`; not stable: one field with `mudcharm` (protocol 6.1) |
 | `mudrealname` | 239 | string | rw | yes | `ob->name` | 5.5: 22 writes (GK prefixes enchant names); `name_pl` is left as it is |
 | `mudtitle` | 240 | string | rw | yes | `ob->title` | 5.5: writable |
 | `mudslaying` | 241 | string | rw | yes | `ob->slaying` | 5.5: the key text, the pet race, the effect list |
