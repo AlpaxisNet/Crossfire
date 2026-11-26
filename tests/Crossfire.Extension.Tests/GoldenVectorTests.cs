@@ -99,7 +99,7 @@ public class GoldenVectorTests
         ("limits", Val.Map(("max_list", Val.Int(256)))));
 
     /// <summary>The frame of each block of section 13.2, built from the values the text gives.</summary>
-    private static Dictionary<string, Frame> Frames() => new()
+    private static Dictionary<string, Frame> Frames() => new Dictionary<string, Frame>
     {
         ["HELLO from the GameServer"] = new HelloFrame(Val.Map(
             ("proto_major", Val.Int(1)), ("proto_minor", Val.Int(0)), ("role", Val.Str("gameserver")),
@@ -124,7 +124,61 @@ public class GoldenVectorTests
         ["PING 9"] = new PingFrame(9),
         ["PONG 9"] = new PongFrame(9),
         ["LOG level 1: \"loaded 3 archetypes\""] = new LogFrame(1, "loaded 3 archetypes"),
-    };
+    }.Concat(Frames11()).ToDictionary(p => p.Key, p => p.Value);
+
+    private static Val Str(params string[] items) => Val.List(items.Select(Val.Str));
+
+    /// <summary>The frames of section 13.3, protocol 1.1's: the host's HELLO of minor 1, a 1.1 extension's HELLO (an item event, a ref parameter, player_classes), gmap.layout, a set of a ref member, a REPLY with caller.setprop and two item events with a fallback each, and the two player queries.</summary>
+    private static Dictionary<string, Frame> Frames11()
+    {
+        Val manifest = Val.Map(
+            ("functions", Val.List()),
+            ("types", Val.List(
+                Val.Map(
+                    ("id", Val.Int(1)), ("name", Val.Str("TMudObject")), ("host", Val.Str("object")),
+                    ("members", Val.List(Val.Map(
+                        ("id", Val.Int(100)), ("name", Val.Str("mudowner")), ("type", Val.Str("ref")), ("access", Val.Str("rw")), ("stable", Val.False)))),
+                    ("methods", Val.List(Val.Map(
+                        ("id", Val.Int(200)), ("name", Val.Str("defaultapply")), ("params", Val.List()), ("ret", Val.Str("void")))))),
+                Val.Map(("id", Val.Int(2)), ("name", Val.Str("TMudPlayer")), ("host", Val.Str("player")), ("members", Val.List()), ("methods", Val.List())))),
+            ("events", Val.List(
+                Val.Map(("name", Val.Str("onApply")), ("target", Val.Str("item")), ("mode", Val.Str("sync")), ("params", Str("handle:TMudPlayer", "int"))),
+                Val.Map(("name", Val.Str("onOwnerChanged")), ("target", Val.Str("object")), ("mode", Val.Str("deferred")), ("params", Str("ref"))))),
+            ("wants_tick", Val.False),
+            ("limits", Val.Map(("max_list", Val.Int(256)))),
+            ("player_classes", Str("mudplayers")));
+        Val effect = Val.Map(("k", Val.Str("caller.setprop")), ("name", Val.Str("this.weapon1")), ("value", Val.Str("sword")));
+        Val withEffect = Val.Map(
+            ("name", Val.Str("onApply")), ("target", Val.Str("item")), ("handle", Val.Handle(Handle(1, 7))), ("type", Val.Str("TMudObject")),
+            ("classes", Str("specialitem")), ("args", Val.List(Val.Handle(Handle(1, 9)), Val.Int(3))),
+            ("fallback", Val.Map(("k", Val.Str("client.text")), ("player", Val.Str("gs1player")), ("text", Val.Str("You cannot use that.")))));
+        Val withInvoke = Val.Map(
+            ("name", Val.Str("onApply")), ("target", Val.Str("item")), ("handle", Val.Handle(Handle(1, 8))), ("type", Val.Str("TMudObject")),
+            ("classes", Val.List()), ("args", Val.List(Val.Handle(Handle(1, 9)), Val.Int(0))),
+            ("fallback", Val.Map(("invoke", Val.Str("defaultapply")), ("handle", Val.Handle(Handle(1, 8))), ("args", Val.List()))));
+        return new Dictionary<string, Frame>
+        {
+            ["HELLO 1.1 from the GameServer (1.1: proto_minor 1)"] = new HelloFrame(Val.Map(
+                ("proto_major", Val.Int(1)), ("proto_minor", Val.Int(1)), ("role", Val.Str("gameserver")),
+                ("name", Val.Str("Alpaxis GameServer")), ("version", Val.Str("1.1")), ("server_name", Val.Str("Test")),
+                ("epoch", Val.Int(1)), ("data_dir", Val.Str("/srv/mud-data/Test")), ("world_dir", Val.Str("/srv/servers/Test")),
+                ("max_frame", Val.Int(16777216)), ("call_timeout_ms", Val.Int(500)))),
+            ["HELLO 1.1 from the extension (1.1: an item event, a ref parameter, player_classes)"] = new HelloFrame(Val.Map(
+                ("proto_major", Val.Int(1)), ("proto_minor", Val.Int(1)), ("role", Val.Str("extension")), ("name", Val.Str("crossfire")),
+                ("version", Val.Str("0.2.0")), ("features", Val.List()), ("manifest", manifest))),
+            ["REQ 6 (1.1): gmap.layout of a 2 by 2 gmap with an empty cell"] = new ReqFrame(6, 17, Array.Empty<ulong>(), Ctx(),
+                new[] { Val.Str("world.gmap"), Val.Int(2), Val.Int(2), Str("a.nw", "b.nw", "c.nw", ""), Val.Int(64) }),
+            ["REPLY 6 (1.1): gmap.layout done"] = new ReplyFrame(6, 0, Val.Nil, Array.Empty<Val>(), Array.Empty<Val>()),
+            ["REQ 7 (1.1): set member 100 (a ref) to the text gs1player"] = new ReqFrame(7, 10, Array.Empty<ulong>(), Ctx("gs1player", "main.nw"),
+                new[] { Val.Handle(Handle(1, 7)), Val.Int(100), Val.Str("gs1player") }),
+            ["REPLY 7 (1.1): caller.setprop, an item event with an effect fallback, an item event with an invoke fallback"] =
+                new ReplyFrame(7, 0, Val.Nil, new[] { effect }, new[] { withEffect, withInvoke }),
+            ["QUERY 2 (1.1): player.pos for gs1player"] = new QueryFrame(2, "player.pos", new[] { Val.Str("gs1player") }),
+            ["QRESULT 2 (1.1): main.nw, 12.5, 30.25"] = new QResultFrame(2, 0, Val.List(Val.Str("main.nw"), Val.Float(12.5), Val.Float(30.25))),
+            ["QUERY 3 (1.1): player.at for gs1player, index 1"] = new QueryFrame(3, "player.at", new[] { Val.Str("gs1player"), Val.Int(1) }),
+            ["QRESULT 3 (1.1): gs2player"] = new QResultFrame(3, 0, Val.Str("gs2player")),
+        };
+    }
 
     public static IEnumerable<object[]> ValueLabels() => Values.Keys.Select(k => new object[] { k });
 
