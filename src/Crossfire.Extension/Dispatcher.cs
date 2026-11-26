@@ -290,8 +290,10 @@ internal sealed partial class Dispatcher : IMemberEnv
         }
         gk = new GkHost { Items = this };
         var w = new CfWorld(gk, WorldLog);
+        PrepareStartPath(w);
         ArchCollection collection = ArchCollector.Collect(arch);
         w.InitArchetypes(collection.Archetypes);
+        InitSkills(w);
 
         int count = 0;
         int parts = 0;
@@ -633,9 +635,12 @@ internal sealed partial class Dispatcher : IMemberEnv
         {
             return Outcome.Fail(Status.BadArgs, "invoke takes a handle, a method id and a list");
         }
-        return WithTarget(args[0], t => t is LevelObject lo
-            ? InvokeOnObject(lo, method, args[2].Items)
-            : Outcome.Fail(Status.BadArgs, "unknown method"));
+        return WithTarget(args[0], t => t switch
+        {
+            LevelObject lo => InvokeOnObject(lo, method, args[2].Items),
+            PlayerState ps => InvokeStartMethod(ps, method, args[2].Items) ?? Outcome.Fail(Status.BadArgs, "unknown method"),
+            _ => Outcome.Fail(Status.BadArgs, "unknown method"),
+        });
     }
 
     // ------------------------------------------------------------------ the manifest's functions

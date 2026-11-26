@@ -250,7 +250,7 @@ public sealed class SkeletonTests
     }
 
     [Fact]
-    public void Build_Given_the_shipped_manifest_When_every_id_is_checked_Then_each_is_in_the_range_of_the_core()
+    public void Build_Given_the_shipped_manifest_When_every_id_is_checked_Then_the_core_ones_are_in_its_range_and_every_other_in_the_range_of_a_lane()
     {
         // Arrange
         Val manifest = Manifest.Build(false, 1);
@@ -261,9 +261,10 @@ public sealed class SkeletonTests
         var members = manifest.Get("types")!.Items.SelectMany(t => t.Get("members")!.Items.Concat(t.Get("methods")!.Items)).Select(m => m.Get("id")!.AsInt).ToList();
 
         // Assert
-        Assert.All(functions, id => Assert.True(Lane.Core.OwnsFunction(id)));
-        Assert.All(types, id => Assert.True(Lane.Core.OwnsType(id)));
-        // the members of the lanes on the core's types are in the range of their own lane (docs/extension.md)
+        Assert.Equal(new long[] { 64, 65, 66, 67 }, functions.Where(Lane.Core.OwnsFunction).ToArray());
+        Assert.Equal(new long[] { 1, 2, 3 }, types.Where(Lane.Core.OwnsType).ToArray());
+        Assert.All(functions, id => Assert.Contains(Lane.All, l => l.OwnsFunction(id)));
+        Assert.All(types, id => Assert.Contains(Lane.All, l => l.OwnsType(id)));
         Assert.All(members, id => Assert.NotNull(Lane.OfMember(id)));
         Assert.Contains((long)Lane.Items.FirstMember, members);
     }

@@ -95,7 +95,7 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | `first_arch_pass` | `CfWorld.FirstArchPass` | ported |
 | `second_arch_pass` | `CfWorld.SecondArchPass` | ported (including `fgets` with a buffer of `MAX_BUF`) |
 | `check_generators` | `CfWorld.CheckGenerators` | ported |
-| `load_archetypes` | `CfWorld.LoadArchetypes(text)` | ported; the text takes the place of the file, `load_treasures` is `CrossfireHost.LoadTreasures` |
+| `load_archetypes` | `CfWorld.LoadArchetypes(text)` | ported; the text takes the place of the file; between the passes `CrossfireHost.LoadTreasures` is called and then, when `CfWorld.TreasureText` is set, `load_treasures` reads it (`CfWorld.LoadTreasureLists`) |
 | `arch_to_object`, `create_singularity`, `get_archetype` | `CfWorld.ArchToObject`, `CreateSingularity`, `GetArchetype` | ported |
 | `hasharch`, `find_archetype`, `add_arch` | `CfWorld.Hasharch`, `FindArchetype`, `AddArch` | ported (5003 slots, linear probing, `ARCHTABLE_TOO_SMALL` is a `CrossfireFatalException`) |
 | `type_to_archetype`, `clone_arch` | `CfWorld.TypeToArchetype`, `CloneArch` | ported |
@@ -153,7 +153,41 @@ The table of the files and functions of Crossfire's server at commit `8b7ee7f90`
 | socket/info.c, common/glue.c | `new_draw_info`, `new_draw_info_format` | `CrossfireHost.DrawInfo` | not ported: the extension's host sends the text to the player's script (docs/extension.md); flags and colour are not passed |
 | socket/item.c | `esrv_send_inventory`, `esrv_draw_look`, `esrv_apply_container`, `esrv_get_ob_from_count`, `ExamineCmd`, `ApplyCmd` | none | not ported: packets of the client; the item strings and the id scope of the extension (docs/extension.md) take their place |
 | common/treasure.c | `load_treasures`, the treasure lists | `CrossfireHost.LoadTreasures`, `FindTreasureList` | not ported here (the treasure phase); the default host knows every name |
+| common/living.c | `fix_player` | `CrossfireHost.FixPlayer` | not ported: the player's stats are the next phase |
+| common/treasure.c | `load_treasures`, the treasure lists | see "common/treasure.c" below | the lists are read from `CfWorld.TreasureText` when it is set; without it the default host knows every name |
 | include/player.h, include/map.h | `struct pl`, `mapdef` | `IPlayerHandle`, `IMapHandle` | not ported: markers that the owner implements |
+
+### common/treasure.c, include/treasure.h (the treasure lists, the subset phase 3 needs)
+
+| C function | C# member | Status |
+| --- | --- | --- |
+| `treasure`, `treasurelist`, `GT_*` | `Treasure`, `TreasureList`, `GT` | ported |
+| `load_treasure` (static), `check_treasurelist` (static), `load_treasures` | `CfWorld.LoadTreasure` (private), `CheckTreasurelist` (private), `LoadTreasureLists(text)` | ported (the text takes the place of the file; `treasure`, `treasureone`, `arch`, `list`, `change_name`, `change_title`, `change_slaying`, `chance`, `nrof`, `magic`, `yes`, `no`, `more`, `end`; `sscanf`'s true-on-EOF and the stale word of `variable` are kept) |
+| `find_treasurelist` | `CfWorld.FindTreasurelist` | ported (the lists read from the text answer; the first of a name is the one found) |
+| `put_treasure` (static), `change_treasure` (static) | `CfWorld.PutTreasure` (private), `ChangeTreasure` (private) | ported; `monster_check_apply_func` is `CrossfireHost.MonsterCheckApply` |
+| `create_all_treasures`, `create_one_treasure`, `create_treasure` | `CfWorld.CreateAllTreasures`, `CreateOneTreasure`, `CreateTreasure` | ported (a list or archetype that does not exist, which C reads through a null pointer, makes nothing; `abort()` is a `CrossfireFatalException`) |
+| `fix_generated_item` | `CfWorld.FixGeneratedItem` | ported for the `GT_STARTEQUIP` branch and `fix_flesh_item` only (docs/differences.md "Treasure lists") |
+| `fix_flesh_item` | `CfWorld.FixFleshItem` | ported |
+| `init_archetype_pointers`, `generate_treasure`, `magic_from_difficulty`, `set_abs_magic`, `set_magic`, `set_ring_bonus`, the artifacts (`load_artifacts`, `generate_artifact`, ...), `dump_*`, `free_*` | none | not ported: random magic and artifacts (phase 4), debugging dumps |
+
+### server/player.c, common/living.c, common/utils.c, server/skill_util.c, include/skillist.h (the start path, `Crossfire.Extension/Gk`)
+
+| C function | C# member | Status |
+| --- | --- | --- |
+| player.c `roll_stat`, `roll_stats` | `Start.RollStat`, `Start.RollStats` | ported (with `USE_SWAP_STATS` and `SORT_ROLLED_STATS` of config.h; the stats are in `Player.OrigStats`; `add_exp(op, 0)` is `LivingRules.AddExpNone`) |
+| player.c `give_initial_items` | `Start.GiveInitialItems` | ported (`start_spells` and `start_prayers` as the numbers of `enum spellnrs`; `pl->randomitems != NULL` is a test of the list that is passed; `known_spells` is `Player.KnownSpells`) |
+| player.c `key_change_class` | `Dispatcher.SetMudClass` (private) | the order of its `d` branch (`init_player_exp`, `give_initial_items`, `link_player_skills`) with the class object put into the tree; the stat bonus part is wave 5D's |
+| player.c `get_player`, `check_login`, `save_player`, `Roll_Again`, `Swap_Stat`, `remove_unpaid_objects`, the rest | none | not ported: the client's dialogue, the login of Crossfire's players (the extension reads the account its own way) |
+| living.c `fix_player` | `FixPlayer.Fix` (called by `GkHost.FixPlayer`) | PARTLY: the stats from `orig_stats` and the applied items' stat bonuses, `check_stat_bounds`, `maxhp`, `maxsp`, `maxgrace` from the levels, and the weight limit (`weight_limit[Str]`, which c_object.c uses). Wave 5D: resistances, ac, wc, damage, speed, light, the flags and the regeneration |
+| living.c `check_stat_bounds`, `level_exp`, `player_lvl_adj`, `con_bonus`, `sp_bonus`, `grace_bonus`, `weight_limit`, `levels` | `LivingRules.*` | ported (`settings.simple_exp` is off; `player_lvl_adj` leaves out the dragon's gifts and the "You are now level" messages) |
+| living.c `add_exp` | `LivingRules.AddExpNone` | the branch for 0 experience only |
+| utils.c `die_roll` | `LivingRules.DieRoll` | ported |
+| skill_util.c `init_new_exp_system`, `init_exp_obj`, `link_skills_to_exp`, `check_link`, `read_skill_params`, `lookup_skill_by_name` | `SkillTable.Create` and its private parts | ported (see docs/differences.md for a world with no or too many experience archetypes) |
+| skill_util.c `init_player_exp`, `link_player_skills`, `link_player_skill`, `unlink_skill` | `SkillTable.InitPlayerExp`, `LinkPlayerSkills`, `LinkPlayerSkill`, `UnlinkSkill` | ported |
+| skill_util.c `find_skill_exp_name` | none | not ported: it fills the client's skill experience statistics |
+| skill_util.c `do_skill`, `check_skill_to_apply`, `change_skill`, `calc_skill_exp`, `learn_skill`, ... | none | not ported (wave 5D and phase 4) |
+| skillist.h `skills[]` | `SkillTable.Skills` | ported |
+| lib/treasures, lib/skill_params | `src/Crossfire.Extension/Data/treasures`, `skill_params` | the files of 8b7ee7f90, unchanged, carried as resources; a file of the same name in the world's folder replaces them |
 
 ### common/item.c (names and descriptions of items)
 

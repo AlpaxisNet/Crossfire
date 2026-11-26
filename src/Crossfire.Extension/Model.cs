@@ -75,13 +75,21 @@ internal sealed class PlayerState
     public PlayerState(string account, CfObject ob)
     {
         Account = account;
+        FileKey = account;
         Ob = ob;
     }
 
     /// <summary>The account name as the host gave it (compared as bytes).</summary>
     public string Account { get; }
 
-    public CfObject Ob { get; }
+    /// <summary>The name the account's file has (<see cref="Account"/> and, after <c>loadmudaccount</c> with a suffix, the suffix): the file the player is read from and saved to.</summary>
+    public string FileKey { get; set; }
+
+    /// <summary>The player's object. It is replaced when an account is loaded again (<c>loadmudaccount</c>); the handle of the player stays.</summary>
+    public CfObject Ob { get; set; }
+
+    /// <summary>False after <c>unloadmudaccount</c> until the account is loaded again: the memory state was dropped, and the file is not written over.</summary>
+    public bool Loaded { get; set; } = true;
 
     /// <summary>The player's controller (C <c>contr</c>), set while the player is logged in.</summary>
     public Gk.Player? Contr => Ob.Contr as Gk.Player;

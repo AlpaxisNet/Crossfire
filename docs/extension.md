@@ -30,8 +30,9 @@ The output folder of the build is an extension folder (protocol section 1): the 
   is `bad_handle`. Releases are ignored: archetypes are permanent, objects in a level are never released, players log out. See
   "Levels, objects and accounts" below.
 - **Items.** A player's inventory has tags, strings for the client and the members `muditems`, `mudmoney`, `mudowner`, `markedobject` and
-  `currentweapon` ("Items of a player" at the end). **Not here yet** (later waves): pick up and drop, apply, skills, the rules of phases 3
-  and 4, treasure lists, queries.
+  `currentweapon` ("Items of a player" at the end).
+- **Not here yet** (later waves): the inventory functions, money, the rules of phases 3 and 4 other than the start path (below),
+  queries.
 
 ## Lifecycle
 
@@ -329,6 +330,8 @@ With Graal Kingdoms' own world, three tests (skipped without the variables) repo
 | `findarchetypebyrealname` | 65 | `string` | `handle:TMudArch` | the first archetype whose clone's `name` equals the argument (`find_archetype_by_object_name`, exact match, list order); nil when there is none |
 | `mudaddobject` | 66 | `float`, `float`, `string` | `handle:TMudObject` | objects.md F1: a new object of that archetype at (x, y) of the request's level; nil and one log line for an unknown archetype or a `treasure <list>` name |
 | `mudaddspecialobject` | 67 | `float`, `float`, `int`, `string`, `string` | `handle:TMudObject` | objects.md F2: the first word of the fourth argument is the archetype, the rest its `slaying`; the fifth its `msg`; the third its `value` |
+| `mudresetplayer` | 2000 | none | `void` | lane 4D (the start path, below): the player of the request's context starts again; the same as the method of `TMudPlayer` |
+| `mudrollstats` | 2001 | none | `void` | lane 4D: the player of the request's context rolls its stats again; the same as the method `rollstats` |
 
 Three types: `TMudArch` (id 1, host `object`, no methods), whose members are all read-only (`access` "r") and **stable**: an
 archetype never changes; `TMudObject` (id 2, host `npc`) and `TMudPlayer` (id 3, host `player`), below. Three events (below), no
@@ -817,4 +820,59 @@ a 1.0 link); more is `too_large`. `mudowner` and `markedobject` have the type `r
 (`MemberTable.ToManifest(linkMinor)`), and a type of the core may hold the members of every lane. `mudowner` is stored as an extra line
 (`mudowner`, a state key of the loader) with the account text; the extension sends the handle of the player while he is online. Objects a
 script or the engine makes (`mudaddobject`, `mudaddspecialobject`, `Dispatcher.NewItem`) are **identified**.
+## The start path (lane 4D)
+
+What a new character needs before it plays (docs/mud-phase3.md section 4.7 of the suite): rolling the stats, choosing a class and
+getting its items, starting again, and the account methods. Everything in it is tested in `StartPathTests.cs`,
+`StartPathUnitTests.cs` and, with Graal Kingdoms' archetypes, `StartPathGkTests.cs`.
+
+**Data.** `session.init` gives the world the text of Crossfire's `lib/treasures` (`CfWorld.TreasureText`: a file `treasures` in the
+world folder, else the copy of Crossfire's file at 8b7ee7f90 that the program carries as a resource, `src/Crossfire.Extension/Data`)
+before it reads the archetypes; `load_treasures` reads it between the two archetype passes, so a `randomitems` name is a real list and
+an unknown one is C's "Couldn't find treasurelist" error. After the archetypes the skills are set up (`SkillTable.Create`: C's
+`init_new_exp_system`) from the world's own `skill_params` file or Crossfire's, which is carried the same way. The class lists of
+Graal Kingdoms' start screen (`warrior`, `barbarian`, `thief`, `priest`, `alchemist`, `sorcerer`, each `<name>_class_items`) hold
+**42 distinct archetypes in 84 items, and every one of them is in Graal Kingdoms' `Arch`**.
+
+**The methods of `TMudPlayer`** (ids 2500 to 2508, `Gk/AccountMethods.cs`; the code is `Dispatcher.Start.cs`) and two functions that
+take the player of the request's context (a script that runs for the player calls them without a receiver):
+
+| Name | Id | Params | Result | What it does |
+| --- | --- | --- | --- | --- |
+| `mudresetplayer` | 2500 and function 2000 | none | `void` | every item of the tree is freed (its handle dies, its string is marked for deletion); the readied skill, the known spells and the marked object are gone; `mudclass` is cleared; experience 0, level 1, food 999; the stats are rolled again; no `onLoadedMudAccount` |
+| `rollstats` | 2501 and function `mudrollstats` 2001 | none | `void` | `roll_stats` of player.c: seven stats, each the best three of four dice, again until the sum is 82 to 116, put in order from high to low (`Str`, `Dex`, `Con`, `Int`, `Wis`, `Pow`, `Cha`: config.h has `SORT_ROLLED_STATS`), kept as the rolled stats, level 0 and experience 0, then the level goes to 1 (the dice of level 1 for hp, sp and grace), `fix_player`, hp and sp at their largest; the strings that changed are set |
+| `setmudclass` | 2502 | `string` | `bool` | the name of a class archetype (`warrior_class`): see below; false and a log line for a name that is no archetype |
+| `setmudclassnoaction` | 2503 | `string` | `void` | sets `mudclass` only (the empty text clears it) |
+| `loadmudaccount` | 2504 | `string` | `bool` | the empty suffix does nothing while the account is loaded; otherwise reads the file again (below) |
+| `unloadmudaccount` | 2505 | none | `void` | drops the memory state without saving |
+| `savemudaccount` | 2506 | none | `void` | writes the file now |
+| `backupmudaccount` | 2507 | none | `void` | writes the file and a copy `backups/<file>.<UTC yyyyMMdd-HHmmss>.txt` |
+| `Mud_LoadAccount` | 2508 | `string` | `bool` | `loadmudaccount("_" + slot)` |
+
+`mudresetplayer`, `setmudclass`, `loadmudaccount` and `unloadmudaccount` call `CheckBusy()` first (they change items): while
+`Dispatcher.Busy` is set they answer error 7.
+
+**`setmudclass("<x>_class")`**, in this order (player.c `key_change_class` does the same for the `d` key): what an earlier choice gave
+goes (the class object, the items with the flag `startequip`, and what the last call put in that is not a stack that merged into
+another one: Alpaxis's choice, so that choosing again does not give the first items twice); the class archetype goes into the tree
+(`type` 37); the player gets the experience objects it lacks (`init_player_exp`); `give_initial_items` makes the class's `randomitems`
+list into the tree with `GT_STARTEQUIP | GT_ONLY_GOOD`; `link_player_skills`; `fix_player`. `mudclass` becomes the name without the
+trailing `_class` (Alpaxis's choice: GK's own script copies `clientr.class`, which has no suffix, with `setmudclassnoaction`).
+Every item of the top level is marked for the next flush. The stat bonuses of the class (`add_statbonus`) are wave 5D's.
+
+**The accounts' file and the rolled values.** `orig_stats`, `levhp`, `levsp` and `levgrace` of `struct pl` are kept on the player's
+object as the lines `mudorigstats` (`Str Dex Con Wis Cha Int Pow`), `mudlevhp`, `mudlevsp` and `mudlevgrace` (the values of levels 1
+to 10), so that the account file has them. A player whose file has none (an account that never rolled) is **not rolled**
+(`Player.StatsRolled`): `fix_player` leaves its stats and life as they are and sets the weight limit only.
+
+**`loadmudaccount`.** With the empty suffix and the account loaded: nothing (true, no effect, no event); login has loaded it before
+the Control NPC's call. With a suffix the file of `<account><suffix>` is read (`Mud_LoadAccount(3)` reads `<account>_3`): when there is
+none the answer is false, a log line is written and the player stays as it is. A load replaces the player's object: the old tree dies
+with its handles, the strings of the old player are deleted, the new tree is marked to be sent (the controller's `NeedsResend` is true
+at the flush), the strings of the stats are set again and `onLoadedMudAccount` fires. The account is then saved to the file that was
+read (`PlayerState.FileKey`). After `unloadmudaccount` the player is a blank one of the player archetype, nothing is written to the
+account's file (neither by a save, a snapshot nor the logout) until the account is loaded again, and a load with the empty suffix
+reads the file (a new player when there is none). The equipment hooks of a load are wave 7B's.
+
+**The manifest.** The builder lets a type of the core hold the members and methods of every lane, each in its own range.
 

@@ -183,7 +183,7 @@ public class ManifestAndMemberTests
     public void Build_Given_the_four_functions_When_read_Then_the_ids_names_and_types_of_the_task()
     {
         // Arrange / Act
-        var fs = Manifest.Build().Get("functions")!.Items;
+        var fs = Manifest.Build().Get("functions")!.Items.Where(f => Lane.Core.OwnsFunction(f.Get("id")!.AsInt)).ToList();
 
         // Assert
         Assert.Equal(new[] { 64L, 65L, 66L, 67L }, fs.Select(f => f.Get("id")!.AsInt));

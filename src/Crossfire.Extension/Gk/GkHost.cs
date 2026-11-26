@@ -7,7 +7,7 @@
 namespace Crossfire.Extension.Gk;
 
 /// <summary>The host of the Crossfire world for Graal Kingdoms' archetypes: <see cref="IsLoaderKey"/> names Graal Kingdoms' own keys.</summary>
-internal sealed class GkHost : CrossfireHost
+internal sealed partial class GkHost : CrossfireHost
 {
     /// <summary>The keys of Graal Kingdoms' archetypes that are not Crossfire's.</summary>
     public static readonly IReadOnlyList<string> OwnKeys = new[]
@@ -24,7 +24,7 @@ internal sealed class GkHost : CrossfireHost
     public static readonly IReadOnlyList<string> StateKeys = new[]
     {
         "mudx", "mudy", "mudblob", "mudimg", "randomvar", "marketprice", "account", "mudclass", "mudpeaceful", "mudlastdeath",
-        "mudverbose", "mudlevelcap", "mudwccap", "mudaccap", "mudowner",
+        "mudverbose", "mudlevelcap", "mudwccap", "mudaccap", "mudowner", Player.OrigStatsKey, Player.LevHpKey, Player.LevSpKey, Player.LevGraceKey,
     };
 
     private static readonly HashSet<string> Keys = new(OwnKeys.Concat(StateKeys), StringComparer.OrdinalIgnoreCase);
@@ -44,7 +44,12 @@ internal sealed class GkHost : CrossfireHost
 
     public override void EsrvDelItem(IPlayerHandle? player, uint tag) => Items?.ItemDeleted(player);
 
-    public override void FixPlayer(CfObject player) => Items?.PlayerFixed(player);
+    // the stats first (lane 4D, GkHost.Start.cs), then the weights and strings the client is shown (lane 4C)
+    public override void FixPlayer(CfObject player)
+    {
+        FixPlayerStats(player);
+        Items?.PlayerFixed(player);
+    }
 
     public override void DrawInfo(CfObject who, string text) => Items?.DrawInfoTo(who, text);
 
