@@ -33,9 +33,6 @@ internal sealed class LevelObject
     /// <summary>The <c>flag</c> lines of the file the object was read from (<c>name=value</c>, as written): its script variables until a blob replaces them.</summary>
     public List<string> SeedFlags { get; } = new();
 
-    /// <summary>objects.md 5.5 <c>savelocally</c>: false keeps the object out of the level file.</summary>
-    public bool SaveLocally { get; set; } = true;
-
     /// <summary>True once an <c>npc.place</c> for it was sent.</summary>
     public bool Placed { get; set; }
 

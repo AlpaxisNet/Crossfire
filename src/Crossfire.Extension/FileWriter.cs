@@ -43,19 +43,35 @@ internal sealed partial class FileWriter
     private readonly object gate = new();
     private readonly Thread thread;
 
-    private Dictionary<string, byte[]> pending = new();
+    private Dictionary<string, byte[]> pending = new();           // files not yet tried: written by the quiet time
+    private readonly Dictionary<string, Retry> retrying = new(); // files whose last write failed: each waits its own back-off
     private long submitted;       // the number of the last submission
     private long written;         // every submission up to this number is on disk (or was discarded)
     private long failed;          // the last submission that a failed pass could not write
     private long dropped;         // the last submission of which a file was given up (it will never be on disk)
     private long generation;      // raised by Discard: a batch of an older generation writes nothing more
-    private long retryAt;         // no ordinary write before this timestamp (the back-off after a failed pass)
-    private int failedPasses;     // failed passes in a row
     private readonly object moveGate = new(); // held for the check and the rename of one file, never for a whole write
     private long firstPending;    // timestamp of the oldest change not yet written
     private long lastChange;      // timestamp of the newest one
     private bool force;
     private bool stopping;
+
+    /// <summary>A file whose write failed: its newest content, how many passes failed in a row and when it may be tried again.</summary>
+    private sealed class Retry
+    {
+        public Retry(byte[] content, int passes, long at)
+        {
+            Content = content;
+            Passes = passes;
+            At = at;
+        }
+
+        public byte[] Content { get; set; }
+
+        public int Passes { get; }
+
+        public long At { get; }
+    }
 
     public FileWriter(string root, FileWriterOptions options, Counters counters, Action<int, string> log)
     {
@@ -75,12 +91,19 @@ internal sealed partial class FileWriter
         lock (gate)
         {
             long now = Stopwatch.GetTimestamp();
-            if (pending.Count == 0)
+            if (retrying.TryGetValue(relativePath, out Retry? waiting))
             {
-                firstPending = now;
+                waiting.Content = content; // the newest content, tried when the file's own back-off is over
             }
-            lastChange = now;
-            pending[relativePath] = content;
+            else
+            {
+                if (pending.Count == 0)
+                {
+                    firstPending = now;
+                }
+                lastChange = now;
+                pending[relativePath] = content;
+            }
             submitted++;
             Monitor.PulseAll(gate);
         }
@@ -94,7 +117,7 @@ internal sealed partial class FileWriter
     {
         lock (gate)
         {
-            return pending.Count == 0 && written >= submitted && dropped == 0;
+            return pending.Count == 0 && retrying.Count == 0 && written >= submitted && dropped == 0;
         }
     }
 
@@ -103,7 +126,7 @@ internal sealed partial class FileWriter
     {
         lock (gate)
         {
-            if (pending.Count > 0)
+            if (pending.Count > 0 || retrying.Count > 0)
             {
                 force = true; // with nothing pending the flag would outlive its write and defeat the quiet time of the next change
             }
@@ -121,7 +144,7 @@ internal sealed partial class FileWriter
         {
             long target = submitted;
             failed = 0; // a failure before this call is tried again
-            if (pending.Count > 0)
+            if (pending.Count > 0 || retrying.Count > 0)
             {
                 force = true;
             }
@@ -150,6 +173,7 @@ internal sealed partial class FileWriter
         lock (gate)
         {
             pending.Clear();
+            retrying.Clear();
             written = submitted;
             force = false;
             generation++;
@@ -186,32 +210,62 @@ internal sealed partial class FileWriter
     {
         for (; ; )
         {
-            Dictionary<string, byte[]> batch;
+            var batch = new Dictionary<string, byte[]>();
+            var passesBefore = new Dictionary<string, int>();
             long batchNumber;
             long batchGeneration;
+            bool seriesOpen;
             lock (gate)
             {
+                bool takeOrdinary;
                 for (; ; )
                 {
                     if (stopping)
                     {
                         return;
                     }
-                    if (pending.Count == 0)
+                    if (pending.Count == 0 && retrying.Count == 0)
                     {
                         Monitor.Wait(gate);
                         continue;
                     }
                     long now = Stopwatch.GetTimestamp();
-                    long due = force ? now : Math.Max(retryAt, Math.Min(lastChange + Ticks(options.Quiet), firstPending + Ticks(options.MaxDelay)));
-                    if (now >= due)
+                    long ordinaryDue = pending.Count == 0 ? long.MaxValue : Math.Min(lastChange + Ticks(options.Quiet), firstPending + Ticks(options.MaxDelay));
+                    takeOrdinary = pending.Count > 0 && (force || now >= ordinaryDue);
+                    long retryDue = long.MaxValue;
+                    foreach ((string path, Retry r) in retrying)
+                    {
+                        if (force || now >= r.At)
+                        {
+                            batch[path] = r.Content;
+                            passesBefore[path] = r.Passes;
+                        }
+                        else
+                        {
+                            retryDue = Math.Min(retryDue, r.At);
+                        }
+                    }
+                    if (takeOrdinary || batch.Count > 0)
                     {
                         break;
                     }
-                    Monitor.Wait(gate, TimeSpan.FromSeconds((double)(due - now) / Stopwatch.Frequency));
+                    long next = Math.Min(ordinaryDue, retryDue);
+                    Monitor.Wait(gate, TimeSpan.FromSeconds((double)(next - now) / Stopwatch.Frequency));
                 }
-                batch = pending;
-                pending = new Dictionary<string, byte[]>();
+                foreach (string path in batch.Keys)
+                {
+                    retrying.Remove(path);
+                }
+                if (takeOrdinary)
+                {
+                    foreach ((string path, byte[] content) in pending)
+                    {
+                        batch[path] = content;
+                        passesBefore.TryAdd(path, 0);
+                    }
+                    pending = new Dictionary<string, byte[]>();
+                }
+                seriesOpen = retrying.Count > 0;
                 batchNumber = submitted;
                 batchGeneration = generation;
                 force = false;
@@ -235,8 +289,9 @@ internal sealed partial class FileWriter
                 catch (Exception e)
                 {
                     counters.CountWriteFailure();
-                    if (failedPasses == 0)
+                    if (!seriesOpen && passesBefore[path] == 0)
                     {
+                        seriesOpen = true; // the first failure of a series is logged, not every file's
                         log(0, "the file " + path + " could not be written (it is tried again, later and later): " + e.Message);
                     }
                     notWritten[path] = content;
@@ -252,30 +307,33 @@ internal sealed partial class FileWriter
                     {
                         dropped = Math.Max(dropped, batchNumber);
                     }
-                    if (notWritten.Count == 0)
+                    var gaveUp = new List<string>();
+                    foreach ((string path, byte[] content) in notWritten)
                     {
-                        written = Math.Max(written, batchNumber);
-                        failedPasses = 0;
-                    }
-                    else if (++failedPasses >= options.MaxFailedPasses)
-                    {
-                        log(0, notWritten.Count + " file(s) could not be written in " + failedPasses + " passes and are given up");
-                        dropped = Math.Max(dropped, batchNumber);
-                        written = Math.Max(written, batchNumber);
-                        failed = Math.Max(failed, batchNumber);
-                        failedPasses = 0;
-                    }
-                    else
-                    {
-                        failed = Math.Max(failed, batchNumber);
-                        foreach ((string path, byte[] content) in notWritten)
+                        int passes = passesBefore[path] + 1;
+                        if (passes >= options.MaxFailedPasses)
                         {
-                            pending.TryAdd(path, content); // a newer submission of the same file stays
+                            gaveUp.Add(path);
+                            pending.Remove(path); // a newer submission of a file given up is given up with it
+                            continue;
                         }
-                        // tried again later and later: Quiet, twice that, ... up to MaxRetryDelay
-                        double seconds = Math.Min(options.MaxRetryDelay.TotalSeconds, options.Quiet.TotalSeconds * Math.Pow(2, failedPasses - 1));
-                        retryAt = Stopwatch.GetTimestamp() + (long)(seconds * Stopwatch.Frequency);
-                        firstPending = lastChange = Stopwatch.GetTimestamp();
+                        // tried again later and later: Quiet, twice that, ... up to MaxRetryDelay, for this file only
+                        double seconds = Math.Min(options.MaxRetryDelay.TotalSeconds, options.Quiet.TotalSeconds * Math.Pow(2, passes - 1));
+                        long at = Stopwatch.GetTimestamp() + (long)(seconds * Stopwatch.Frequency);
+                        // a newer submission of the same file (it came while this one was written) is the content that waits
+                        byte[] newest = pending.Remove(path, out byte[]? newer) ? newer : content;
+                        retrying[path] = new Retry(newest, passes, at);
+                        failed = Math.Max(failed, batchNumber);
+                    }
+                    if (gaveUp.Count > 0)
+                    {
+                        log(0, gaveUp.Count + " file(s) could not be written in " + options.MaxFailedPasses + " passes and are given up: " + gaveUp[0]);
+                        dropped = Math.Max(dropped, batchNumber);
+                        failed = Math.Max(failed, batchNumber);
+                    }
+                    if (pending.Count == 0 && retrying.Count == 0)
+                    {
+                        written = Math.Max(written, submitted); // nothing is outstanding: everything is on disk or given up
                     }
                 } // else: discarded while it was written; Discard has accounted for everything and nothing comes back
                 Monitor.PulseAll(gate);

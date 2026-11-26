@@ -181,7 +181,7 @@ internal static class LevelFiles
         world.SaveMapHeader(sb, level.Header, 1);
         foreach (LevelObject lo in level.Objects)
         {
-            if (lo.SaveLocally && !lo.Dead)
+            if (!lo.Dead)
             {
                 sb.Append(ObjectBlock(world, lo));
             }

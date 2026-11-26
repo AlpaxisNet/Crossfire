@@ -487,7 +487,7 @@ public abstract class AccountTests
 
         // Act
         ReplyFrame readOnly = Set(ext, h, Ply("mudid"), Val.Int(1));
-        ReplyFrame objectOnly = Set(ext, h, Obj("savelocally"), Val.True);
+        ReplyFrame objectOnly = Set(ext, h, Obj("nopick"), Val.True);
 
         // Assert
         Assert.Equal((ulong)Status.BadArgs, readOnly.Status);

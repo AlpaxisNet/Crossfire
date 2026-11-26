@@ -271,10 +271,14 @@ internal sealed partial class Dispatcher
     // ------------------------------------------------------------------ objects
 
     /// <summary>The effect of a write on a target: the event of a level object (objects.md 3.2) or the client string of a player.</summary>
-    private void AfterSet(object target, Bound member, Val stored)
+    private void AfterSet(object target, Bound member, Val stored, bool changed)
     {
         if (target is LevelObject lo)
         {
+            if (!changed)
+            {
+                return;
+            }
             lo.Level.Dirty = true;
             events.Add(Val.Map(
                 ("name", Val.Str(Manifest.EventOnUpdateObject)),
@@ -413,6 +417,24 @@ internal sealed partial class Dispatcher
         return Attach(level, ob, x, y);
     }
 
+    /// <summary>
+    /// Adds the <c>npc.place</c> of a made object to the reply and returns its handle. A maker is atomic: when this fails (the tags
+    /// of the epoch are used up) the object leaves the level again, so that no object is saved that the host never shows.
+    /// </summary>
+    private Val Place(LevelObject lo)
+    {
+        try
+        {
+            effects.Add(PlaceEffect(lo));
+            return Val.Handle(handles.HandleOf(lo));
+        }
+        catch
+        {
+            DestroyObject(lo, removeNpc: false);
+            throw;
+        }
+    }
+
     private LevelObject Attach(Level level, CfObject ob, double x, double y)
     {
         ob.Map = level;
@@ -438,8 +460,7 @@ internal sealed partial class Dispatcher
         {
             return Outcome.Ok(Val.Nil);
         }
-        effects.Add(PlaceEffect(lo));
-        return Outcome.Ok(Val.Handle(handles.HandleOf(lo)));
+        return Outcome.Ok(Place(lo));
     }
 
     private Outcome MudAddSpecialObject(IReadOnlyList<Val> args)
@@ -478,8 +499,7 @@ internal sealed partial class Dispatcher
             lo.Ob.Msg = message;
         }
         lo.Ob.Value = (int)Math.Clamp(Math.Truncate(value), int.MinValue, int.MaxValue);
-        effects.Add(PlaceEffect(lo));
-        return Outcome.Ok(Val.Handle(handles.HandleOf(lo)));
+        return Outcome.Ok(Place(lo));
     }
 
     private Outcome InvokeOnObject(LevelObject lo, long method, IReadOnlyList<Val> args)
@@ -504,9 +524,7 @@ internal sealed partial class Dispatcher
                     return Outcome.Fail(Status.Internal, "the object cannot be cloned");
                 }
                 LevelObject clone = Attach(lo.Level, copy, x, y);
-                clone.SaveLocally = lo.SaveLocally;
-                effects.Add(PlaceEffect(clone));
-                return Outcome.Ok(Val.Handle(handles.HandleOf(clone)));
+                return Outcome.Ok(Place(clone));
             }
             case TMudObjectMembers.MethodDestroyMudObject:
                 if (args.Count != 0)

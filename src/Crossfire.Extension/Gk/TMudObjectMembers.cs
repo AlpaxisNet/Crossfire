@@ -87,15 +87,6 @@ internal static class TMudObjectMembers
         b.Flag("startequip", Define.FLAG_STARTEQUIP, true, true);
         b.Flag("ismudmonster", Define.FLAG_MONSTER, false, true);
         b.Add("ismudobject", "bool", false, true, (_, _) => Val.True, null);
-        b.Add("savelocally", "bool", true, true, (_, lo) => Val.Bool(lo.SaveLocally), (_, lo, v) =>
-        {
-            if (!v.IsNil && !v.IsBool)
-            {
-                return SetResult.Fail("the member takes a bool");
-            }
-            lo.SaveLocally = v.AsBool;
-            return SetResult.Ok(Val.Bool(lo.SaveLocally));
-        });
 
         var methods = new[]
         {

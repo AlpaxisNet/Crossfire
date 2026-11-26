@@ -349,24 +349,6 @@ public abstract class LevelObjectTests
     }
 
     [Fact]
-    public void Level_Given_savelocally_false_When_saved_Then_the_object_is_not_in_the_file_but_still_in_the_level()
-    {
-        // Arrange
-        using IExt ext = Hall();
-        (List<Val> places, _) = LoadAll(ext, "hall.nw");
-        ulong sword = places[1].Get("handle")!.AsHandle;
-        Assert.Equal(0UL, Set(ext, sword, Obj("savelocally"), Val.False).Status);
-
-        // Act
-        string text = Flushed(ext, "levels/hall.nw.map");
-
-        // Assert
-        Assert.DoesNotContain("arch sword", text);
-        Assert.Contains("arch banana", text);
-        Assert.Equal(0UL, ext.Call(9, new[] { H(sword), Val.Int(Obj("mudname")) }).Status);
-    }
-
-    [Fact]
     public void Level_Given_script_variables_of_the_seed_and_no_blob_When_saved_Then_flag_lines_are_kept_and_a_blob_replaces_them()
     {
         // Arrange
@@ -1123,7 +1105,7 @@ public abstract class LevelObjectTests
 
         // Act
         ReplyFrame playerMemberOnObject = ext.Call(9, new[] { H(h), Val.Int(Ply("levelcap")) });
-        ReplyFrame objectMemberOnArch = ext.Call(9, new[] { H(arch), Val.Int(Obj("savelocally")) });
+        ReplyFrame objectMemberOnArch = ext.Call(9, new[] { H(arch), Val.Int(Obj("ismudobject")) });
         ReplyFrame many = ext.Call(11, new[] { H(h), Val.List(Val.Int(Obj("mudhp")), Val.Int(Arch("mudname"))) });
 
         // Assert
@@ -1357,6 +1339,79 @@ public abstract class LevelObjectTests
     }
 
     [Fact]
+    public void Destroyed_Given_an_object_made_and_saved_When_the_host_reports_it_gone_Then_the_next_file_has_no_such_object()
+    {
+        // Arrange
+        using IExt ext = Hall();
+        (List<Val> places, _) = LoadAll(ext, "hall.nw");
+        ulong sword = places[1].Get("handle")!.AsHandle;
+        ulong made = Add(ext, "hall.nw", "banana", 5, 6);
+        string before = Flushed(ext, "levels/hall.nw.map");
+
+        // Act
+        ReplyFrame destroyed = ext.Call(14, new[] { H(sword) });
+        ReplyFrame destroyedMade = ext.Call(14, new[] { H(made) });
+        string after = Flushed(ext, "levels/hall.nw.map", t => !t.Contains("arch sword"));
+
+        // Assert
+        Assert.Equal(0UL, destroyed.Status);
+        Assert.Equal(0UL, destroyedMade.Status);
+        Assert.Contains("arch sword", before);
+        Assert.DoesNotContain("arch sword", after);
+        Assert.Equal(after.Split("arch banana").Length - 1 + 1, before.Split("arch banana").Length - 1); // the made banana is gone, the seed's stay
+        Assert.Contains("arch banana", after);
+    }
+
+    [Fact]
+    public void Set_Given_the_value_the_member_already_has_When_set_Then_ok_and_no_event_but_a_changed_value_fires_one()
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make());
+        ulong h = Add(ext, "main.nw", "banana");
+        Set(ext, h, Obj("mudhp"), Val.Int(7));
+        Flushed(ext, "levels/main.nw.map");
+
+        // Act
+        ReplyFrame same = Set(ext, h, Obj("mudhp"), Val.Int(7));
+        ReplyFrame other = Set(ext, h, Obj("mudhp"), Val.Int(8));
+
+        // Assert
+        Assert.Equal(0UL, same.Status);
+        Assert.Empty(same.Events);
+        Assert.Equal(0UL, other.Status);
+        Assert.Single(other.Events);
+    }
+
+    [Theory]
+    [InlineData("add")]
+    [InlineData("special")]
+    [InlineData("clone")]
+    public void Maker_Given_the_tags_used_up_When_an_object_is_made_Then_it_is_not_left_in_the_level_or_its_file(string maker)
+    {
+        // Arrange
+        using IExt ext = Start(ObjectWorld.Make(), new ExtensionOptions { TagLimit = 1 });
+        ulong first = Add(ext, "main.nw", "banana");
+
+        // Act
+        ReplyFrame failed = maker switch
+        {
+            "add" => ext.Call(Manifest.OpMudAddObject, new[] { N(3), N(4), S("sword") }, level: "main.nw"),
+            "special" => ext.Call(Manifest.OpMudAddSpecialObject, new[] { N(3), N(4), Val.Int(1), S("sword"), S("") }, level: "main.nw"),
+            _ => ext.Call(13, new[] { H(first), Val.Int(TMudObjectMembers.MethodCloneMudObject), Val.List(N(1), N(1)) }),
+        };
+        string text = Flushed(ext, "levels/main.nw.map");
+        ReplyFrame stats = ext.Call(15);
+
+        // Assert
+        Assert.Equal((ulong)Status.Internal, failed.Status);
+        Assert.Empty(failed.Effects);
+        Assert.Equal(1L, stats.Result.Get("level_objects")!.AsInt);
+        Assert.Contains("arch banana", text);
+        Assert.DoesNotContain("arch sword", text);
+        Assert.Equal(1, text.Split("arch banana").Length - 1);
+    }
+
+    [Fact]
     public void Flush_Given_changed_levels_and_no_more_changes_When_flushed_Then_the_files_are_written_and_a_second_flush_leaves_them()
     {
         // Arrange
@@ -1498,25 +1553,6 @@ public abstract class LevelObjectTests
 
         // Assert
         Assert.True(Assert.Single(places).Get("blob")!.IsNil);
-    }
-
-    [Fact]
-    public void CloneMudObject_Given_an_object_that_is_not_saved_When_cloned_Then_the_clone_is_not_saved_either()
-    {
-        // Arrange
-        using IExt ext = Hall();
-        (List<Val> places, _) = LoadAll(ext, "hall.nw");
-        ulong sword = places[1].Get("handle")!.AsHandle;
-        Set(ext, sword, Obj("savelocally"), Val.False);
-        ReplyFrame r = ext.Call(13, new[] { H(sword), Val.Int(TMudObjectMembers.MethodCloneMudObject), Val.List(N(1), N(1)) });
-
-        // Act
-        string text = Flushed(ext, "levels/hall.nw.map");
-
-        // Assert
-        Assert.Equal(0UL, r.Status);
-        Assert.DoesNotContain("arch sword", text);
-        Assert.False(Get(ext, r.Result.AsHandle, Obj("savelocally")).AsBool);
     }
 
     [Fact]

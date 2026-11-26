@@ -83,10 +83,12 @@ content of a file as bytes) and hands it over, and does not wait for Wr except i
 - **Failures.** Any exception of a write is a failed write; it never ends the thread. A name the system refuses
   (`ArgumentException`, `NotSupportedException`, `PathTooLongException`) is given up at once. Any other failure (disk full, a folder
   in the way, no permission) is counted (`writer_failures`, once per file and pass) and tried again after the quiet time, then
-  after twice that and so on up to 30 s (`MaxRetryDelay`); only the first failure of a series is logged, and after 8 failed passes
-  in a row (`MaxFailedPasses`) the files are given up and logged once. A newer submission of the same name replaces the old content
-  that is waiting to be tried again. A flush or shutdown forces a try regardless of the back-off; `session.shutdown` with
-  `save` true answers `internal` when a file was given up or not written in time.
+  after twice that and so on up to 30 s (`MaxRetryDelay`). The back-off is per file: a file that failed waits its own time while the
+  others are written at their usual times; a newer submission of a file that waits replaces its content and does not shorten the
+  wait. Only the first failure of a series (a failure while no other file is waiting to be tried again) is logged; after 8 failed
+  passes of one file in a row (`MaxFailedPasses`) that file is given up and logged once per pass. A flush or shutdown forces a try of
+  every file regardless of the back-off; `session.shutdown` with `save` true answers `internal` when a file was given up or not
+  written in time.
 - **Start.** When the writer starts (the process holds the lock then) it removes `<name>.<pid>.tmp` files that a crashed process
   left in the data folder.
 - **`.lock`**: the lock file (empty).
@@ -169,8 +171,9 @@ end
   (and stays in the file). When a blob comes, the `flag` lines go away and `mudblob` is written; `npc.place` then gives the blob
   back and no props. An empty blob is stored as none. The blob is opaque: the extension never reads it. A flag line the object's
   archetype has too is the archetype's, not the file's.
-- **Which objects are written.** Every object of the level except one with `savelocally` false (objects.md 8.3); the contents of an
-  object are written inside it. A level that did not change since it was read or saved is not written again (a seed level is
+- **Which objects are written.** Every object of the level; the contents of an object are written inside it. There is no member
+  `savelocally`: it is a built-in property of the host's NPCs, and the host decides what to keep. An object the host does not keep is
+  reported with `object.destroyed` (op 14), and is gone from the level and from its file at the next write. A level that did not change since it was read or saved is not written again (a seed level is
   saved as soon as it has objects: the saved file then takes over). A level whose objects are all gone is saved as a header only.
   Written: at `level.unload`, `session.flush`, `session.shutdown` with save and at the end of the connection.
 - **Floats** are written as C's saver writes them (`%f`, 6 decimals): the seed's `speed_left -0.100000023` comes back as
@@ -231,9 +234,11 @@ that tells `Abc` from `abc` (Linux).
   has `npc.remove` for it; no `onMudDestroy` (objects.md F5). Nothing else changes.
 - **`object.destroyed`** (op 14): the same without the effect (the host's NPC is gone), no event (objects.md F7). `bad_handle` for a
   handle that is not an object in a level.
-- **Events.** `onUpdateObject` (target object, sync, `args` empty) fires after every successful `set` of a member of a level object,
-  whichever member (objects.md 3.2 says every write of a `mud*` member and of the state flags: INFERRED; here also `img`,
-  `savelocally` and the extra-line members). It does not fire for a player (the event's target is an object: a player has no NPC),
+- **Events.** `onUpdateObject` (target object, sync, `args` empty) fires after a successful `set` of a member of a level object that
+  changed the value, whichever writable member (objects.md 3.2 says every write of a `mud*` member and of the state flags:
+  INFERRED; here also `img` and the extra-line members). A `set` that stores the value the member already had fires no event and
+  does not mark the level changed, so a handler that writes a member back to what it read cannot loop (GK's own handlers write
+  none: `showhp` and `showobject` only draw and keep script variables). It does not fire for a player (the event's target is an object: a player has no NPC),
   for a read, or for a refused write. `onMudDestroy` (object, sync) is in the manifest for the rules of phase 4 and is never sent
   yet. `onLoadedMudAccount` (player, sync) fires at the login that loaded the player, with the player's handle as its one argument.
 
@@ -538,7 +543,6 @@ an empty `mudtitle`, `mudslaying` or `mudrace` clears the field. `mudrealname` c
 | `startequip` | 270 | bool | rw | yes | `FLAG_STARTEQUIP` | 4.7 table; 5.5 |
 | `ismudmonster` | 271 | bool | r | yes | `FLAG_MONSTER` | 4.7 table: read only |
 | `ismudobject` | 272 | bool | r | yes | always true | 5.5: "true for every mud object" |
-| `savelocally` | 273 | bool | rw | yes | state of the level object (not a Crossfire field): false keeps it out of the level file; default true | 5.5: INFERRED, 12 writes (GK sets false for spawned monsters); 8.3 |
 
 **Methods of TMudObject**
 
@@ -622,7 +626,7 @@ that is nil until the host passes the player object itself (a protocol gap, repo
 - A seed level is read for any level name that is a plain file name (the host decides which levels it loads); a level with neither
   file is unknown to `level.load` and starts empty for `mudaddobject`.
 - Position and blob: the host's row replaces the extension's; an empty blob is none; the seed's `flag` lines are the props until then.
-- `onUpdateObject` fires for every writable member (also `img`, `savelocally`, the extra-line members), not for players.
+- `onUpdateObject` fires for a writable member (also `img`, the extra-line members) when the set changed its value, not for players.
 - `onLoadedMudAccount` fires once per load, not at a second login; its argument is the handle of the player.
 - A new player is the first PLAYER archetype of the world in the order of the archetypes (C's `get_player_archetype(NULL)`; in Graal
   Kingdoms' own `Arch` that is `dwarf_player`); its `name` is the account. Class, race and stats are phase 3: whether Graal Kingdoms'

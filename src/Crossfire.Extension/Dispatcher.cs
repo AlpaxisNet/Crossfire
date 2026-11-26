@@ -524,12 +524,15 @@ internal sealed partial class Dispatcher : IMemberEnv
             {
                 return Outcome.Fail(Status.BadArgs, "member " + id + " is read-only");
             }
+            Val before = t is LevelObject ? m.Read() : Val.Nil;
             SetResult r = m.Write(args[2]);
             if (r.Stored is not { } stored)
             {
                 return Outcome.Fail(Status.BadArgs, r.Error ?? "the value does not fit the member");
             }
-            AfterSet(t, m, stored);
+            // a write that leaves the value as it was changes nothing: no event (a handler that writes what it read would loop), no save
+            bool changed = t is not LevelObject || !Val.Same(before, m.Read());
+            AfterSet(t, m, stored, changed);
             return Outcome.Ok(stored);
         });
     }
